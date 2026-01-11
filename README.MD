@@ -40,7 +40,7 @@ let windows_icon_set = default_folder_icon_provider.dump_default_folder_icon_win
 - Run integration tests: `cargo test`
 
 ## License
-GNU GPL v3
+MIT OR Apache-2.0
 
 ## Status
 **Work in progress.** Not yet published to crates.io. API may change. Only Windows is implemented for now.
