@@ -3,6 +3,7 @@ use std::{borrow::Cow, collections::BTreeMap};
 
 use crate::icon::IconError;
 
+/// Compatible image sizes for Windows icons (in pixels)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum WindowsIconSize {
     Px16,
@@ -63,6 +64,7 @@ impl WindowsIconSize {
     }
 }
 
+/// An individual image in a Windows icon. References image data and is size-validated.
 #[derive(Debug, Clone)]
 pub struct WindowsIconImage<'a> {
     pub size: WindowsIconSize,
@@ -91,12 +93,14 @@ impl<'a> From<WindowsIconImage<'a>> for crate::api::IconImage {
     }
 }
 
+/// A Windows icon set composed of individual sizes.
 #[derive(Debug, Clone)]
 pub struct WindowsIconSet<'a> {
     images: BTreeMap<WindowsIconSize, WindowsIconImage<'a>>,
 }
 
 impl<'a> WindowsIconSet<'a> {
+    /// Constructor from icons; must contain no duplicates
     pub fn from_icons<I>(icons: I) -> Result<Self, IconError>
     where
         I: IntoIterator<Item = WindowsIconImage<'a>>,

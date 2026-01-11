@@ -36,6 +36,7 @@ fn ensure_com_initialized() {
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.unwrap();
 }
 
+/// Provides Windows folder icon settings operations
 pub trait WindowsFolderSettingsProviderExt {
     /// Set the icon for a folder
     fn set_icon_for_folder_windows<P: AsRef<Path>>(
@@ -47,6 +48,7 @@ pub trait WindowsFolderSettingsProviderExt {
     /// Reset the icon for a folder
     fn reset_icon_for_folder_windows<P: AsRef<Path>>(&self, path: P) -> Result<()>;
 
+    /// Constructor with Windows-specific options.
     fn new_windows(block_known_folders: bool, generated_icon_prefix: Option<&str>) -> Self;
 }
 
