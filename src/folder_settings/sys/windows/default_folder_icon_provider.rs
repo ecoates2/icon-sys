@@ -100,7 +100,7 @@ fn load_icon_set_from_shell32<'a>() -> Result<WindowsIconSet<'a>, WindowsFolderS
         let mut hdc_screen = unsafe { CreateCompatibleDC(None) };
         hdc_screen = (!hdc_screen.is_invalid())
             .then_some(hdc_screen)
-            .ok_or_else(windows::core::Error::from_win32)?;
+            .ok_or_else(windows::core::Error::from_thread)?;
         hdc_screen
     };
 
@@ -113,14 +113,14 @@ fn load_icon_set_from_shell32<'a>() -> Result<WindowsIconSet<'a>, WindowsFolderS
 
         let get_obj_bytes_written = unsafe {
             GetObjectW(
-                icon_info.hbmColor,
+                icon_info.hbmColor.into(),
                 std::mem::size_of::<BITMAP>().try_into().unwrap(),
                 Some(&mut bmp as *mut _ as *mut c_void),
             )
         };
         if get_obj_bytes_written == 0 {
             return Err(WindowsFolderSettingsError::Win32(
-                windows::core::Error::from_win32(),
+                windows::core::Error::from_thread(),
             ));
         }
 
@@ -154,7 +154,7 @@ fn load_icon_set_from_shell32<'a>() -> Result<WindowsIconSet<'a>, WindowsFolderS
 
         if lines_copied == 0 {
             return Err(WindowsFolderSettingsError::Win32(
-                windows::core::Error::from_win32(),
+                windows::core::Error::from_thread(),
             ));
         }
 
@@ -184,7 +184,7 @@ fn load_icon_set_from_shell32<'a>() -> Result<WindowsIconSet<'a>, WindowsFolderS
     let delete_dc = unsafe { windows::Win32::Graphics::Gdi::DeleteDC(hdc_screen) }.as_bool();
     if !delete_dc {
         return Err(WindowsFolderSettingsError::Win32(
-            windows::core::Error::from_win32(),
+            windows::core::Error::from_thread(),
         ));
     }
 
@@ -213,20 +213,20 @@ fn get_icon_directory<'a>(
 ) -> Result<Vec<&'a GrpIconDirEntry>, WindowsFolderSettingsError> {
     // Find and load icon group resource data
     let h_rsrc = {
-        let mut h_rsrc = unsafe { FindResourceW(h_mod, FOLDER_ICON_RESOURCE, RT_GROUP_ICON) };
+        let mut h_rsrc = unsafe { FindResourceW(Some(h_mod), FOLDER_ICON_RESOURCE, RT_GROUP_ICON) };
         h_rsrc = (!h_rsrc.is_invalid())
             .then_some(h_rsrc)
-            .ok_or_else(windows::core::Error::from_win32)?;
+            .ok_or_else(windows::core::Error::from_thread)?;
         h_rsrc
     };
 
-    let h_global = unsafe { LoadResource(h_mod, h_rsrc) }?;
+    let h_global = unsafe { LoadResource(Some(h_mod), h_rsrc) }?;
 
     let raw_res_ptr = {
         let mut raw_res_ptr = unsafe { LockResource(h_global) };
         raw_res_ptr = (!raw_res_ptr.is_null())
             .then_some(raw_res_ptr)
-            .ok_or_else(windows::core::Error::from_win32)?;
+            .ok_or_else(windows::core::Error::from_thread)?;
         raw_res_ptr
     };
 
@@ -255,28 +255,28 @@ fn get_icon_directory<'a>(
 
 fn load_specific_icon(h_mod: HMODULE, id: u16) -> Result<HICON, WindowsFolderSettingsError> {
     let h_rsrc = {
-        let mut h_rsrc = unsafe { FindResourceW(h_mod, make_int_resource_w!(id), RT_ICON) };
+        let mut h_rsrc = unsafe { FindResourceW(Some(h_mod), make_int_resource_w!(id), RT_ICON) };
         h_rsrc = (!h_rsrc.is_invalid())
             .then_some(h_rsrc)
-            .ok_or_else(windows::core::Error::from_win32)?;
+            .ok_or_else(windows::core::Error::from_thread)?;
         h_rsrc
     };
 
-    let h_global = unsafe { LoadResource(h_mod, h_rsrc) }?;
+    let h_global = unsafe { LoadResource(Some(h_mod), h_rsrc) }?;
 
     let lp_data = {
         let mut lp_data = unsafe { LockResource(h_global) };
         lp_data = (!lp_data.is_null())
             .then_some(lp_data)
-            .ok_or_else(windows::core::Error::from_win32)?;
+            .ok_or_else(windows::core::Error::from_thread)?;
         lp_data
     };
 
     let dw_size = {
-        let mut dw_size = unsafe { SizeofResource(h_mod, h_rsrc) };
+        let mut dw_size = unsafe { SizeofResource(Some(h_mod), h_rsrc) };
         dw_size = (dw_size != 0)
             .then_some(dw_size)
-            .ok_or_else(windows::core::Error::from_win32)?;
+            .ok_or_else(windows::core::Error::from_thread)?;
         dw_size
     };
 
