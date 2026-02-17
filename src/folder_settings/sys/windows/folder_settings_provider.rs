@@ -235,8 +235,8 @@ fn encode_to_system<P: AsRef<Path>>(icon_set: &WindowsIconSet, ico_path: P) -> R
         let mut new_icon_attribs = unsafe { GetFileAttributesW(&HSTRING::from(ico_path.as_ref())) };
         new_icon_attribs = (new_icon_attribs != INVALID_FILE_ATTRIBUTES)
             .then_some(new_icon_attribs)
-            .ok_or_else(windows::core::Error::from_win32)
-            .map_err(|e| {
+            .ok_or_else(windows::core::Error::from_thread)
+            .map_err(|e: windows::core::Error| {
                 WindowsFolderSettingsError::IconOperation(
                     ico_path.as_ref().to_path_buf(),
                     format!(
@@ -315,7 +315,7 @@ fn set_folder_icon_settings(
     let mut fcs = SHFOLDERCUSTOMSETTINGS {
         dwSize: std::mem::size_of::<SHFOLDERCUSTOMSETTINGS>() as u32,
         dwMask: FCSM_ICONFILE,
-        pszIconFile: PWSTR(icon_path_hstr.as_wide().as_ptr() as *mut _),
+        pszIconFile: PWSTR(icon_path_hstr.as_ptr() as *mut _),
         ..SHFOLDERCUSTOMSETTINGS::default()
     };
 
