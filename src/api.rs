@@ -12,12 +12,15 @@ pub struct IconImage {
 /// Platform-agnostic system icon image set
 pub struct IconSet {
     pub images: Vec<IconImage>,
+    /// Optional scalable SVG representation.
+    pub svg: Option<String>,
 }
 
 impl From<IconImage> for IconSet {
     fn from(value: IconImage) -> Self {
         Self {
             images: vec![value],
+            svg: None,
         }
     }
 }

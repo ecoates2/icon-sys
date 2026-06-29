@@ -167,7 +167,7 @@ impl<'a> From<WindowsIconSet<'a>> for crate::api::IconSet {
             .into_values()
             .map(crate::api::IconImage::from)
             .collect();
-        crate::api::IconSet { images }
+        crate::api::IconSet { images, svg: None }
     }
 }
 

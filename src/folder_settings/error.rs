@@ -8,6 +8,10 @@ pub enum FolderSettingsError {
     #[error(transparent)]
     Windows(#[from] crate::folder_settings::sys::windows::WindowsFolderSettingsError),
 
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    Linux(#[from] crate::folder_settings::sys::linux::LinuxFolderSettingsError),
+
     #[error(transparent)]
     IconError(#[from] crate::icon::IconError),
 }

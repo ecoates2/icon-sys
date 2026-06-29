@@ -1,4 +1,4 @@
-#![doc = include_str!("../README.md")]
+#![doc = include_str!("../README.MD")]
 
 pub mod api;
 pub mod error;
