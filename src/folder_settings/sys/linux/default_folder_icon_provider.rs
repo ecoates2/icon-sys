@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use std::process::Command;
 use std::borrow::Cow;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use super::LinuxFolderSettingsError;
 use crate::folder_settings::DefaultFolderIconProvider;
@@ -11,13 +11,17 @@ const COMMON_SIZES: [u32; 8] = [16, 22, 24, 32, 48, 64, 128, 256];
 
 pub trait LinuxDefaultFolderIconProviderExt {
     /// Dump the default folder icon from the active icon theme.
-    fn dump_default_folder_icon_linux(&self) -> Result<LinuxIconSet<'static>, LinuxFolderSettingsError>;
+    fn dump_default_folder_icon_linux(
+        &self,
+    ) -> Result<LinuxIconSet<'static>, LinuxFolderSettingsError>;
 }
 
 pub struct LinuxDefaultFolderIconProvider;
 
 impl LinuxDefaultFolderIconProviderExt for LinuxDefaultFolderIconProvider {
-    fn dump_default_folder_icon_linux(&self) -> Result<LinuxIconSet<'static>, LinuxFolderSettingsError> {
+    fn dump_default_folder_icon_linux(
+        &self,
+    ) -> Result<LinuxIconSet<'static>, LinuxFolderSettingsError> {
         load_folder_icon_set()
     }
 }
@@ -38,7 +42,12 @@ fn active_theme() -> String {
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().trim_matches('\'').to_string())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .trim_matches('\'')
+                .to_string()
+        })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "hicolor".to_string())
 }
@@ -56,15 +65,17 @@ fn theme_base_dirs() -> Vec<PathBuf> {
 
 /// Candidate paths for the `folder` "places" icon at a given size, across
 /// both `<size>/places` and `places/<size>` theme layouts.
-fn raster_candidates(base: &PathBuf, theme: &str, size: u32) -> Vec<PathBuf> {
+fn raster_candidates(base: &Path, theme: &str, size: u32) -> Vec<PathBuf> {
     vec![
-        base.join(theme).join(format!("{size}x{size}/places/folder.png")),
-        base.join(theme).join(format!("places/{size}x{size}/folder.png")),
+        base.join(theme)
+            .join(format!("{size}x{size}/places/folder.png")),
+        base.join(theme)
+            .join(format!("places/{size}x{size}/folder.png")),
         base.join(theme).join(format!("{size}/places/folder.png")),
     ]
 }
 
-fn svg_candidates(base: &PathBuf, theme: &str) -> Vec<PathBuf> {
+fn svg_candidates(base: &Path, theme: &str) -> Vec<PathBuf> {
     vec![
         base.join(theme).join("scalable/places/folder.svg"),
         base.join(theme).join("places/scalable/folder.svg"),
@@ -74,8 +85,11 @@ fn svg_candidates(base: &PathBuf, theme: &str) -> Vec<PathBuf> {
 fn load_folder_icon_set() -> Result<LinuxIconSet<'static>, LinuxFolderSettingsError> {
     let theme = active_theme();
     let bases = theme_base_dirs();
-    // Always include hicolor as a fallback theme.
-    let themes = [theme.as_str(), "hicolor"];
+    // Search the detected theme first, then Adwaita (the common GNOME default,
+    // present whenever `adwaita-icon-theme` is installed) as a practical
+    // fallback for headless/server environments where theme detection fails,
+    // and finally `hicolor` as the freedesktop-mandated last resort.
+    let themes = [theme.as_str(), "Adwaita", "hicolor"];
 
     let mut set = LinuxIconSet::new();
 
@@ -89,7 +103,10 @@ fn load_folder_icon_set() -> Result<LinuxIconSet<'static>, LinuxFolderSettingsEr
                     if candidate.exists()
                         && let Ok(img) = image::open(&candidate)
                     {
-                        set.add_image(LinuxIconImage { size, image: Cow::Owned(img) });
+                        set.add_image(LinuxIconImage {
+                            size,
+                            image: Cow::Owned(img),
+                        });
                         break 'found;
                     }
                 }

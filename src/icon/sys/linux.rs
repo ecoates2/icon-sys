@@ -142,7 +142,7 @@ impl<'a> IntoIterator for &'a LinuxIconSet<'a> {
 // Conversion to api::IconSet (SVG is preserved).
 impl<'a> From<LinuxIconSet<'a>> for crate::api::IconSet {
     fn from(linux_set: LinuxIconSet) -> Self {
-        let svg = linux_set.svg.clone();
+        let svg = linux_set.svg;
         let images = linux_set
             .raster
             .into_values()
@@ -166,5 +166,91 @@ impl<'a> From<&'a crate::api::IconSet> for LinuxIconSet<'a> {
             let _ = set.set_svg(svg.clone());
         }
         set
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, RgbaImage};
+
+    fn img(size: u32) -> DynamicImage {
+        DynamicImage::ImageRgba8(RgbaImage::new(size, size))
+    }
+
+    fn linux_img(size: u32) -> LinuxIconImage<'static> {
+        LinuxIconImage {
+            size,
+            image: Cow::Owned(img(size)),
+        }
+    }
+
+    #[test]
+    fn from_icons_rejects_duplicate_sizes() {
+        let err = LinuxIconSet::from_icons([linux_img(48), linux_img(48)]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn from_icons_accepts_distinct_sizes() {
+        let set = LinuxIconSet::from_icons([linux_img(16), linux_img(48)]).unwrap();
+        assert!(set.get_image(16).is_some());
+        assert!(set.get_image(48).is_some());
+    }
+
+    #[test]
+    fn largest_returns_biggest_size() {
+        let mut set = LinuxIconSet::new();
+        set.add_image(linux_img(16));
+        set.add_image(linux_img(256));
+        set.add_image(linux_img(48));
+        assert_eq!(set.largest().unwrap().size, 256);
+    }
+
+    #[test]
+    fn is_empty_tracks_raster_and_svg() {
+        let mut set = LinuxIconSet::new();
+        assert!(set.is_empty());
+        set.add_image(linux_img(32));
+        assert!(!set.is_empty());
+    }
+
+    #[test]
+    fn set_svg_rejects_garbage() {
+        let mut set = LinuxIconSet::new();
+        assert!(set.set_svg("not an svg").is_err());
+        assert!(set.svg().is_none());
+    }
+
+    #[test]
+    fn set_svg_accepts_valid_markup() {
+        let mut set = LinuxIconSet::new();
+        set.set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
+            .unwrap();
+        assert!(set.svg().is_some());
+    }
+
+    #[test]
+    fn from_raster_as_svg_produces_valid_embedded_svg() {
+        let set = LinuxIconSet::from_raster_as_svg(&img(64)).unwrap();
+        let svg = set.svg().expect("svg present");
+        assert!(svg.contains("viewBox=\"0 0 64 64\""));
+        assert!(svg.contains("data:image/png;base64,"));
+        // No raster sizes stored; SVG-only.
+        assert!(set.get_image(64).is_none());
+        assert_eq!(set.iter().count(), 0);
+    }
+
+    #[test]
+    fn iconset_roundtrip_preserves_svg_and_raster() {
+        let mut set = LinuxIconSet::new();
+        set.add_image(linux_img(48));
+        set.set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
+            .unwrap();
+
+        let api: crate::api::IconSet = set.into();
+        let back = LinuxIconSet::from(&api);
+        assert!(back.get_image(48).is_some());
+        assert!(back.svg().is_some());
     }
 }

@@ -4,10 +4,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum LinuxFolderSettingsError {
-    /// The detected/selected backend does not support the requested operation.
-    #[error("unsupported desktop backend: {0}")]
-    UnsupportedBackend(String),
-
     /// Could not detect a supported desktop environment.
     #[error("could not detect a supported desktop environment")]
     UndetectedDesktop,

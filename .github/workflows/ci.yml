@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref to save runner time.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    # Shared CI logic lives in the central ecoates2/.github repo.
+    uses: ecoates2/.github/.github/workflows/rust-ci.yml@v1
+    with:
+      # gio CLI + a folder icon theme for the Linux backend tests.
+      linux-apt-packages: libglib2.0-bin adwaita-icon-theme hicolor-icon-theme
