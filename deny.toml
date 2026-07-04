@@ -25,6 +25,7 @@ allow = [
     "CC0-1.0",
     "ISC",
     "Zlib",
+    "NCSA"
 ]
 
 [bans]
