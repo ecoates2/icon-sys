@@ -47,7 +47,7 @@ fn test_set_folder_icon() {
     let folder_path = temp_dir.path();
 
     let folder_settings_provider = WindowsFolderSettingsProvider::new_windows(true, None);
-    let result = folder_settings_provider.set_icon_for_folder_windows(&folder_path, &icon_set);
+    let result = folder_settings_provider.set_icon_for_folder_windows(folder_path, &icon_set);
     assert!(
         result.is_ok(),
         "Failed to set folder icon: {:?}",
@@ -67,7 +67,7 @@ fn test_reset_folder_icon() {
     let folder_path = temp_dir.path();
 
     let folder_settings_provider = WindowsFolderSettingsProvider::new_windows(true, None);
-    let result = folder_settings_provider.reset_icon_for_folder_windows(&folder_path);
+    let result = folder_settings_provider.reset_icon_for_folder_windows(folder_path);
     assert!(
         result.is_ok(),
         "Failed to reset folder icon: {:?}",
