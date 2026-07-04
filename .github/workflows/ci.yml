@@ -17,6 +17,7 @@ jobs:
   ci:
     # Shared CI logic lives in the central ecoates2/.github repo.
     uses: ecoates2/.github/.github/workflows/rust-ci.yml@v1
+    secrets: inherit
     with:
       # gio CLI + a folder icon theme for the Linux backend tests.
       linux-apt-packages: libglib2.0-bin adwaita-icon-theme hicolor-icon-theme
