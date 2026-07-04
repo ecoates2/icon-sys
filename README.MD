@@ -1,6 +1,7 @@
 # icon-sys
 
 [![CI](https://github.com/ecoates2/icon-sys/actions/workflows/ci.yml/badge.svg)](https://github.com/ecoates2/icon-sys/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/ecoates2/icon-sys/graph/badge.svg)](https://codecov.io/gh/ecoates2/icon-sys)
 [![crates.io](https://img.shields.io/crates/v/icon-sys.svg)](https://crates.io/crates/icon-sys)
 [![docs.rs](https://img.shields.io/docsrs/icon-sys)](https://docs.rs/icon-sys)
 [![license](https://img.shields.io/crates/l/icon-sys.svg)](https://github.com/ecoates2/icon-sys#license)
