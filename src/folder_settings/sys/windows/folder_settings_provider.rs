@@ -200,9 +200,10 @@ impl WindowsFolderSettingsProvider {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().and_then(|ext| ext.to_str()) == Some("ico")
-                && let Some(file_name) = path.file_name().and_then(|name| name.to_str())
-                && file_name.starts_with(&self.generated_icon_prefix)
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| is_generated_icon(name, &self.generated_icon_prefix))
             {
                 return Ok(Some(path));
             }
@@ -216,6 +217,19 @@ impl WindowsFolderSettingsProvider {
     fn generate_unique_ico_file_name(&self) -> String {
         format!("{}-{}.ico", &self.generated_icon_prefix, Uuid::new_v4())
     }
+}
+
+/// Returns whether `file_name` names one of this crate's generated icon files:
+/// a `.ico` whose name begins with the configured prefix.
+///
+/// Kept free of filesystem access so the match logic can be unit-tested in
+/// isolation, mirroring the pure helpers used by the other platform backends.
+fn is_generated_icon(file_name: &str, prefix: &str) -> bool {
+    Path::new(file_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        == Some("ico")
+        && file_name.starts_with(prefix)
 }
 
 /// 1. Encode and write the provided icon set to a .ico file at the provided path.
@@ -355,4 +369,87 @@ fn clear_folder_icon_settings<P: AsRef<Path>>(directory: P) -> Result<()> {
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::icon::sys::windows::{WindowsIconImage, WindowsIconSize};
+    use std::borrow::Cow;
+
+    /// Builds a provider that does not initialize COM, keeping unit tests free
+    /// of side effects. With `block_known_folders` disabled no COM apartment is
+    /// created, so construction performs no I/O.
+    fn provider_with_prefix(prefix: &str) -> WindowsFolderSettingsProvider {
+        WindowsFolderSettingsProvider::new_windows(false, Some(prefix))
+    }
+
+    fn sample_icon_set() -> WindowsIconSet<'static> {
+        let icons = WindowsIconSize::all().map(|size| {
+            let dim = size.dimension();
+            WindowsIconImage {
+                size,
+                image: Cow::Owned(image::DynamicImage::new_rgba8(dim, dim)),
+            }
+        });
+        WindowsIconSet::from_icons(icons).unwrap()
+    }
+
+    #[test]
+    fn default_prefix_is_crate_name() {
+        let p = WindowsFolderSettingsProvider::new_windows(false, None);
+        assert_eq!(p.generated_icon_prefix, DEFAULT_GENERATED_ICON_PREFIX);
+    }
+
+    #[test]
+    fn generated_ico_name_uses_prefix_and_extension() {
+        let p = provider_with_prefix("myprefix");
+        let name = p.generate_unique_ico_file_name();
+        assert!(name.starts_with("myprefix-"));
+        assert!(name.ends_with(".ico"));
+    }
+
+    #[test]
+    fn generated_ico_names_are_unique() {
+        let p = provider_with_prefix("gen");
+        assert_ne!(
+            p.generate_unique_ico_file_name(),
+            p.generate_unique_ico_file_name()
+        );
+    }
+
+    #[test]
+    fn generated_ico_name_is_recognized_as_generated() {
+        // The name we produce must be matched by the predicate we clean up with.
+        let p = provider_with_prefix("gen");
+        let name = p.generate_unique_ico_file_name();
+        assert!(is_generated_icon(&name, "gen"));
+    }
+
+    #[test]
+    fn is_generated_icon_matches_prefixed_ico() {
+        assert!(is_generated_icon("icon-sys-1234.ico", "icon-sys"));
+    }
+
+    #[test]
+    fn is_generated_icon_rejects_wrong_extension() {
+        assert!(!is_generated_icon("icon-sys-1234.png", "icon-sys"));
+    }
+
+    #[test]
+    fn is_generated_icon_rejects_missing_extension() {
+        assert!(!is_generated_icon("icon-sys-1234", "icon-sys"));
+    }
+
+    #[test]
+    fn is_generated_icon_rejects_wrong_prefix() {
+        assert!(!is_generated_icon("other-1234.ico", "icon-sys"));
+    }
+
+    #[test]
+    fn to_ico_frames_produces_one_frame_per_size() {
+        let set = sample_icon_set();
+        let frames = to_ico_frames(&set).unwrap();
+        assert_eq!(frames.len(), WindowsIconSize::NUM_SIZES);
+    }
 }

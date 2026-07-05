@@ -189,3 +189,140 @@ impl<'a> TryFrom<&'a crate::api::IconSet> for WindowsIconSet<'a> {
             .ok_or_else(|| IconError::IconSet(format!("Missing sizes: {:?}", missing)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{DynamicImage, RgbaImage};
+
+    fn img(size: u32) -> DynamicImage {
+        DynamicImage::ImageRgba8(RgbaImage::new(size, size))
+    }
+
+    fn win_img(size: WindowsIconSize) -> WindowsIconImage<'static> {
+        WindowsIconImage {
+            size,
+            image: Cow::Owned(img(size.dimension())),
+        }
+    }
+
+    fn full_set() -> WindowsIconSet<'static> {
+        WindowsIconSet::from_icons(WindowsIconSize::all().map(win_img)).unwrap()
+    }
+
+    #[test]
+    fn dimension_roundtrips_through_from_dimension() {
+        for size in WindowsIconSize::all() {
+            assert_eq!(
+                WindowsIconSize::from_dimension(size.dimension()),
+                Some(size)
+            );
+        }
+    }
+
+    #[test]
+    fn from_dimension_rejects_unknown_sizes() {
+        assert_eq!(WindowsIconSize::from_dimension(0), None);
+        assert_eq!(WindowsIconSize::from_dimension(17), None);
+        assert_eq!(WindowsIconSize::from_dimension(512), None);
+    }
+
+    #[test]
+    fn all_yields_every_size_in_ascending_order() {
+        let sizes: Vec<_> = WindowsIconSize::all().collect();
+        assert_eq!(sizes.len(), WindowsIconSize::NUM_SIZES);
+        let mut sorted = sizes.clone();
+        sorted.sort();
+        assert_eq!(sizes, sorted);
+    }
+
+    #[test]
+    fn from_icons_rejects_duplicate_sizes() {
+        let result = WindowsIconSet::from_icons([
+            win_img(WindowsIconSize::Px32),
+            win_img(WindowsIconSize::Px32),
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_icons_accepts_distinct_sizes() {
+        let set = WindowsIconSet::from_icons([
+            win_img(WindowsIconSize::Px16),
+            win_img(WindowsIconSize::Px32),
+        ])
+        .unwrap();
+        assert!(set.get_image(WindowsIconSize::Px16).is_some());
+        assert!(set.get_image(WindowsIconSize::Px32).is_some());
+    }
+
+    #[test]
+    fn add_image_replaces_existing_size() {
+        let mut set = WindowsIconSet::from_icons([win_img(WindowsIconSize::Px16)]).unwrap();
+        set.add_image(win_img(WindowsIconSize::Px16));
+        assert_eq!(set.iter().count(), 1);
+    }
+
+    #[test]
+    fn missing_sizes_reports_absent_sizes() {
+        let set = WindowsIconSet::from_icons([win_img(WindowsIconSize::Px16)]).unwrap();
+        assert!(!set.is_complete());
+        assert_eq!(set.missing_sizes().len(), WindowsIconSize::NUM_SIZES - 1);
+        assert!(!set.missing_sizes().contains(&WindowsIconSize::Px16));
+    }
+
+    #[test]
+    fn complete_set_reports_no_missing_sizes() {
+        let set = full_set();
+        assert!(set.is_complete());
+        assert!(set.missing_sizes().is_empty());
+    }
+
+    #[test]
+    fn iter_is_sorted_by_size() {
+        let set = full_set();
+        let sizes: Vec<_> = set.iter().map(|(s, _)| *s).collect();
+        let mut sorted = sizes.clone();
+        sorted.sort();
+        assert_eq!(sizes, sorted);
+    }
+
+    #[test]
+    fn win_image_try_from_api_rejects_invalid_dimension() {
+        let bad = crate::api::IconImage { data: img(17) };
+        assert!(WindowsIconImage::try_from(&bad).is_err());
+    }
+
+    #[test]
+    fn win_image_try_from_api_accepts_valid_dimension() {
+        let good = crate::api::IconImage { data: img(48) };
+        let win = WindowsIconImage::try_from(&good).unwrap();
+        assert_eq!(win.size, WindowsIconSize::Px48);
+    }
+
+    #[test]
+    fn try_from_iconset_requires_all_sizes() {
+        let partial = crate::api::IconSet {
+            images: vec![crate::api::IconImage { data: img(16) }],
+            svg: None,
+        };
+        assert!(WindowsIconSet::try_from(&partial).is_err());
+    }
+
+    #[test]
+    fn try_from_iconset_rejects_invalid_dimension() {
+        let bad = crate::api::IconSet {
+            images: vec![crate::api::IconImage { data: img(17) }],
+            svg: None,
+        };
+        assert!(WindowsIconSet::try_from(&bad).is_err());
+    }
+
+    #[test]
+    fn iconset_roundtrip_preserves_all_sizes() {
+        let set = full_set();
+        let api: crate::api::IconSet = set.into();
+        let back = WindowsIconSet::try_from(&api).unwrap();
+        assert!(back.is_complete());
+    }
+}

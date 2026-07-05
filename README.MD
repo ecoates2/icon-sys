@@ -60,7 +60,7 @@ as raster sizes plus an optional, `usvg`-validated scalable SVG. Setting a singl
 large image is sufficient — file managers scale it for all zoom levels.
 
 ## Platform Support
-- **Windows:** Full support
+- **Windows:** Folder settings and default icon dump
 - **Linux:** Folder settings (GNOME/KDE/XFCE backends) and default icon dump
 - **macOS:** Planned support
 
