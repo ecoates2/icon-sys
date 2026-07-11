@@ -215,7 +215,7 @@ impl WindowsFolderSettingsProvider {
     /// Generates a unique icon file name for a newly generated icon.
     /// Having a unique name each time is necessary to refresh the icon cache.
     fn generate_unique_ico_file_name(&self) -> String {
-        format!("{}-{}.ico", &self.generated_icon_prefix, Uuid::new_v4())
+        format!("{}-{}.ico", self.generated_icon_prefix, Uuid::new_v4())
     }
 }
 
