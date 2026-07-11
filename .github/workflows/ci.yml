@@ -20,4 +20,7 @@ jobs:
     secrets: inherit
     with:
       # gio CLI + a folder icon theme for the Linux backend tests.
-      linux-apt-packages: libglib2.0-bin adwaita-icon-theme hicolor-icon-theme
+      linux-apt-packages: |
+        libglib2.0-bin
+        adwaita-icon-theme
+        hicolor-icon-theme
