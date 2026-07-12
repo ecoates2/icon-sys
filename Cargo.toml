@@ -18,7 +18,7 @@ uuid = {version = "1.19", features = ["v4"]}
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rust-ini = "0.21"
-usvg = "0.45"
+usvg = "0.47"
 filetime = "0.2"
 base64 = "0.22"
 
