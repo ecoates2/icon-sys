@@ -1,5 +1,6 @@
 use crate::DefaultFolderIconProvider;
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MacOsDefaultFolderIconProvider;
 
 impl DefaultFolderIconProvider for MacOsDefaultFolderIconProvider {

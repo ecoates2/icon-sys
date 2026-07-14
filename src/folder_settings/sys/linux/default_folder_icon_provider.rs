@@ -16,6 +16,7 @@ pub trait LinuxDefaultFolderIconProviderExt {
     ) -> Result<LinuxIconSet<'static>, LinuxFolderSettingsError>;
 }
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct LinuxDefaultFolderIconProvider;
 
 impl LinuxDefaultFolderIconProviderExt for LinuxDefaultFolderIconProvider {

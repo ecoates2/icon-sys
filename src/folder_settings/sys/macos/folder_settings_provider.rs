@@ -1,5 +1,6 @@
 use crate::FolderSettingsProvider;
 
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MacOsFolderSettingsProvider;
 
 impl FolderSettingsProvider for MacOsFolderSettingsProvider {

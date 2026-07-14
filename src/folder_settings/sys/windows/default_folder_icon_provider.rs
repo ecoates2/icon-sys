@@ -66,6 +66,7 @@ pub trait WindowsDefaultFolderIconProviderExt {
 }
 
 /// Provides default system folder icon operations
+#[derive(Debug, Clone, Copy, Default)]
 pub struct WindowsDefaultFolderIconProvider;
 
 impl WindowsDefaultFolderIconProviderExt for WindowsDefaultFolderIconProvider {

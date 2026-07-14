@@ -5,11 +5,13 @@ use crate::error::Result;
 use std::path::Path;
 
 /// Individual size of a system icon
+#[derive(Debug, Clone)]
 pub struct IconImage {
     pub data: DynamicImage,
 }
 
 /// Platform-agnostic system icon image set
+#[derive(Debug, Clone, Default)]
 pub struct IconSet {
     pub images: Vec<IconImage>,
     /// Optional scalable SVG representation.

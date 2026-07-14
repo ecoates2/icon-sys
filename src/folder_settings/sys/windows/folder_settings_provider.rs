@@ -53,6 +53,7 @@ pub trait WindowsFolderSettingsProviderExt {
 }
 
 /// Provides Windows folder icon settings operations
+#[derive(Debug, Clone)]
 pub struct WindowsFolderSettingsProvider {
     // COM interface for managing known folders (ex. Desktop, Downloads).
     // It's only used here to check if a folder is NOT a known folder before proceeding with writes/resets.

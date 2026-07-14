@@ -1,2 +1,5 @@
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MacOsIconImage;
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MacOsIconSet;

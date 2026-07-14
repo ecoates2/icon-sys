@@ -87,6 +87,7 @@ pub trait LinuxFolderSettingsProviderExt {
     fn reset_icon_for_folder_linux<P: AsRef<Path>>(&self, path: P) -> Result<()>;
 }
 
+#[derive(Debug, Clone)]
 pub struct LinuxFolderSettingsProvider {
     backend: LinuxBackend,
     generated_icon_prefix: String,
