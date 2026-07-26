@@ -20,7 +20,7 @@ uuid = {version = "1.19", features = ["v4"]}
 rust-ini = "0.21"
 usvg = "0.47"
 filetime = "0.2"
-base64 = "0.22"
+base64 = "0.23"
 
 [target.'cfg(windows)'.dependencies]
 windows = {version = "0.62.0", features = [
