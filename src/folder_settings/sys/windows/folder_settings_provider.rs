@@ -14,7 +14,7 @@ use crate::{
 use image::codecs::ico::{IcoEncoder, IcoFrame};
 use uuid::Uuid;
 use windows::Win32::{
-    Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, INVALID_FILE_ATTRIBUTES},
+    Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
     System::Com::{CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoInitializeEx},
     UI::Shell::{
         FCS_FORCEWRITE, FCSM_ICONFILE, FFFP_EXACTMATCH, IKnownFolderManager, KnownFolderManager,
@@ -26,14 +26,26 @@ use windows::core::{HSTRING, PWSTR};
 use windows::Win32::System::Com::CoCreateInstance;
 
 use windows::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, GetFileAttributesW, SetFileAttributesW,
+    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, SetFileAttributesW,
 };
 
 const DEFAULT_GENERATED_ICON_PREFIX: &str = env!("CARGO_PKG_NAME");
 
-/// Initializes COM on the currently executing thread.
-fn ensure_com_initialized() {
-    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.unwrap();
+/// Initializes COM on the currently executing thread with apartment threading.
+///
+/// Returns `Ok(())` on success. `RPC_E_CHANGED_MODE` (already initialized
+/// with a different concurrency model) is treated as benign — the caller may
+/// still proceed without the known-folder guard.
+fn ensure_com_initialized() -> std::result::Result<(), windows::core::Error> {
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+    }
+    Ok(())
+}
+
+/// Helper to create a `WindowsFolderSettingsError::IconOperation` for a given path and message.
+fn icon_op_error<P: AsRef<Path>>(path: P, msg: &str) -> WindowsFolderSettingsError {
+    WindowsFolderSettingsError::IconOperation(path.as_ref().to_path_buf(), msg.to_string())
 }
 
 /// Provides Windows folder icon settings operations
@@ -83,10 +95,16 @@ impl FolderSettingsProvider for WindowsFolderSettingsProvider {
 
 impl WindowsFolderSettingsProviderExt for WindowsFolderSettingsProvider {
     fn new_windows(block_known_folders: bool, generated_icon_prefix: Option<&str>) -> Self {
-        let com_known_folder_manager = block_known_folders.then(|| {
-            ensure_com_initialized();
-            unsafe { CoCreateInstance(&KnownFolderManager, None, CLSCTX_ALL) }.unwrap()
-        });
+        let com_known_folder_manager = if block_known_folders {
+            // If COM init or CoCreateInstance fails, fall back to None.
+            // RPC_E_CHANGED_MODE (thread already has a different COM concurrency model)
+            // is benign — the caller may still proceed without the known-folder guard.
+            ensure_com_initialized().ok().and_then(|_| unsafe {
+                CoCreateInstance(&KnownFolderManager, None, CLSCTX_ALL).ok()
+            })
+        } else {
+            None
+        };
 
         let generated_icon_prefix = if let Some(p) = generated_icon_prefix {
             p.to_owned()
@@ -117,10 +135,18 @@ impl WindowsFolderSettingsProviderExt for WindowsFolderSettingsProvider {
         let new_icon_path = PathBuf::from(path.as_ref()).join(&generated_ico_name);
 
         // Write to a .ico
-        encode_to_system(icon_set, &new_icon_path)?;
+        if let Err(e) = encode_to_system(icon_set, &new_icon_path) {
+            // If encoding fails, clean up the orphaned file
+            let _ = std::fs::remove_file(&new_icon_path);
+            return Err(e);
+        }
 
         // Instruct Windows to use the new icon for the folder.
-        set_folder_icon_settings(path, &generated_ico_name)?;
+        if let Err(e) = set_folder_icon_settings(path.as_ref(), &generated_ico_name) {
+            // If setting the folder icon fails, clean up the orphaned .ico file
+            let _ = std::fs::remove_file(&new_icon_path);
+            return Err(e);
+        }
 
         Ok(())
     }
@@ -129,7 +155,11 @@ impl WindowsFolderSettingsProviderExt for WindowsFolderSettingsProvider {
         // Perform all necessary checks on the directory before proceeding.
         self.validate_folder(&path)?;
 
-        clear_folder_icon_settings(&path)?;
+        if let Err(e) = clear_folder_icon_settings(path.as_ref()) {
+            // If clearing folder settings fails, attempt to clean up orphaned .ico files
+            let _ = self.remove_existing_generated_ico(&path);
+            return Err(e);
+        }
 
         self.remove_existing_generated_ico(&path).map_err(|e| {
             WindowsFolderSettingsError::IconOperation(path.as_ref().to_path_buf(), e.to_string())
@@ -143,20 +173,14 @@ impl WindowsFolderSettingsProvider {
     /// Validate that a folder's icon can be modified
     fn validate_folder<P: AsRef<Path>>(&self, directory: P) -> Result<()> {
         // Check that it exists.
-        directory.as_ref().exists().then_some(()).ok_or_else(|| {
-            WindowsFolderSettingsError::IconOperation(
-                directory.as_ref().to_path_buf(),
-                "Directory does not exist on filesystem".to_string(),
-            )
-        })?;
+        if !directory.as_ref().exists() {
+            return Err(icon_op_error(&directory, "Directory does not exist on filesystem").into());
+        }
 
         // Check that it's a directory.
-        directory.as_ref().is_dir().then_some(()).ok_or_else(|| {
-            WindowsFolderSettingsError::IconOperation(
-                directory.as_ref().to_path_buf(),
-                "Path is not a directory".to_string(),
-            )
-        })?;
+        if !directory.as_ref().is_dir() {
+            return Err(icon_op_error(&directory, "Path is not a directory").into());
+        }
 
         if let Some(com_known_folder_manager) = &self.com_known_folder_manager {
             // Check that it's not a known folder. (ex. C:\Users\username\Documents)
@@ -167,36 +191,32 @@ impl WindowsFolderSettingsProvider {
             }
             .is_err()
             .then_some(())
-            .ok_or_else(|| {
-                WindowsFolderSettingsError::IconOperation(
-                    directory.as_ref().to_path_buf(),
-                    "Folder is a known folder".to_string(),
-                )
-            })?;
+            .ok_or_else(|| icon_op_error(&directory, "Folder is a known folder"))?;
         }
 
         Ok(())
     }
 
-    /// Find and remove any existing generated .ico files in the provided directory.
+    /// Find and remove ALL existing generated .ico files in the provided directory.
     fn remove_existing_generated_ico<P: AsRef<Path>>(
         &self,
         directory: P,
     ) -> core::result::Result<(), std::io::Error> {
-        let existing_ico_file = self.find_existing_ico(directory)?;
+        let existing_ico_files = self.find_existing_icos(directory)?;
 
-        if let Some(existing_ico_file) = existing_ico_file {
-            std::fs::remove_file(existing_ico_file)?;
+        for existing_ico_file in existing_ico_files {
+            std::fs::remove_file(&existing_ico_file)?;
         }
 
         Ok(())
     }
 
-    /// Returns the path for the first existing generated .ico file in the provided directory, if any.
-    fn find_existing_ico<P: AsRef<Path>>(
+    /// Returns all paths to generated .ico files in the provided directory.
+    fn find_existing_icos<P: AsRef<Path>>(
         &self,
         directory: P,
-    ) -> core::result::Result<Option<PathBuf>, std::io::Error> {
+    ) -> core::result::Result<Vec<PathBuf>, std::io::Error> {
+        let mut found = Vec::new();
         for entry in fs::read_dir(directory.as_ref())? {
             let entry = entry?;
             let path = entry.path();
@@ -206,11 +226,11 @@ impl WindowsFolderSettingsProvider {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| is_generated_icon(name, &self.generated_icon_prefix))
             {
-                return Ok(Some(path));
+                found.push(path);
             }
         }
 
-        Ok(None)
+        Ok(found)
     }
 
     /// Generates a unique icon file name for a newly generated icon.
@@ -221,16 +241,32 @@ impl WindowsFolderSettingsProvider {
 }
 
 /// Returns whether `file_name` names one of this crate's generated icon files:
-/// a `.ico` whose name begins with the configured prefix.
+/// a `.ico` whose name matches the pattern `{prefix}-{uuid}.ico` where uuid
+/// is a standard v4 UUID (8-4-4-4-12 hex digits).
 ///
-/// Kept free of filesystem access so the match logic can be unit-tested in
-/// isolation, mirroring the pure helpers used by the other platform backends.
+/// This strict format prevents accidental deletion of user-created icon files
+/// that happen to share the prefix but don't follow the generated naming convention.
 fn is_generated_icon(file_name: &str, prefix: &str) -> bool {
-    Path::new(file_name)
+    // Check it's an .ico file
+    if Path::new(file_name)
         .extension()
         .and_then(|ext| ext.to_str())
-        == Some("ico")
-        && file_name.starts_with(prefix)
+        != Some("ico")
+    {
+        return false;
+    }
+
+    // Check it starts with prefix-{uuid}.ico
+    if !file_name.starts_with(prefix) {
+        return false;
+    }
+
+    // Extract the UUID portion: everything between the dash after the prefix and ".ico"
+    let rest = &file_name[prefix.len()..];
+    rest.find(".ico")
+        .map(|i| &rest[1..i])
+        .map(|uuid_str| Uuid::parse_str(uuid_str).is_ok())
+        .unwrap_or(false)
 }
 
 /// 1. Encode and write the provided icon set to a .ico file at the provided path.
@@ -245,28 +281,12 @@ fn encode_to_system<P: AsRef<Path>>(icon_set: &WindowsIconSet, ico_path: P) -> R
     encode_and_write_ico(ico_frames, &ico_path)?;
 
     // Make the resulting icon file have the hidden and system attributes.
+    // We just created this file, so we know it exists—no need to check attributes first.
+    let ico_path_hstr = HSTRING::from(ico_path.as_ref());
+    let new_icon_attribs = FILE_ATTRIBUTE_HIDDEN.0 | FILE_ATTRIBUTE_SYSTEM.0;
 
-    let mut new_icon_attribs = FILE_FLAGS_AND_ATTRIBUTES({
-        let mut new_icon_attribs = unsafe { GetFileAttributesW(&HSTRING::from(ico_path.as_ref())) };
-        new_icon_attribs = (new_icon_attribs != INVALID_FILE_ATTRIBUTES)
-            .then_some(new_icon_attribs)
-            .ok_or_else(windows::core::Error::from_thread)
-            .map_err(|e: windows::core::Error| {
-                WindowsFolderSettingsError::IconOperation(
-                    ico_path.as_ref().to_path_buf(),
-                    format!(
-                        "Failed to get file attributes for generated icon: {}",
-                        e.message()
-                    ),
-                )
-            })?;
-        new_icon_attribs
-    });
-
-    new_icon_attribs |= FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM;
-
-    unsafe { SetFileAttributesW(&HSTRING::from(ico_path.as_ref()), new_icon_attribs) }.map_err(
-        |e| {
+    unsafe { SetFileAttributesW(&ico_path_hstr, FILE_FLAGS_AND_ATTRIBUTES(new_icon_attribs)) }
+        .map_err(|e| {
             WindowsFolderSettingsError::IconOperation(
                 ico_path.as_ref().to_path_buf(),
                 format!(
@@ -274,8 +294,7 @@ fn encode_to_system<P: AsRef<Path>>(icon_set: &WindowsIconSet, ico_path: P) -> R
                     e.message()
                 ),
             )
-        },
-    )?;
+        })?;
 
     Ok(())
 }
@@ -326,39 +345,33 @@ fn set_folder_icon_settings(
     // this leads to some confusing UB.
     let icon_path_hstr = HSTRING::from(icon_path.as_ref());
 
-    // Using a relative path for the icon file so that the icon is still displayed even if the folder is moved.
-    let mut fcs = SHFOLDERCUSTOMSETTINGS {
-        dwSize: std::mem::size_of::<SHFOLDERCUSTOMSETTINGS>() as u32,
-        dwMask: FCSM_ICONFILE,
-        pszIconFile: PWSTR(icon_path_hstr.as_ptr() as *mut _),
-        ..SHFOLDERCUSTOMSETTINGS::default()
-    };
-
-    unsafe {
-        SHGetSetFolderCustomSettings(&mut fcs, &HSTRING::from(directory.as_ref()), FCS_FORCEWRITE)
-    }
-    .map_err(|e| {
-        WindowsFolderSettingsError::IconOperation(
-            directory.as_ref().to_path_buf(),
-            format!("Failed to set folder custom settings: {}", e.message()),
-        )
-    })?;
-
-    Ok(())
+    set_folder_icon_internal(directory, Some(&icon_path_hstr))
 }
 
 /// Wipe windows shell settings for folder icon
 fn clear_folder_icon_settings<P: AsRef<Path>>(directory: P) -> Result<()> {
     // Set the folder icon to a null string; this instructs Windows to remove the setting from desktop.ini and display the default
     // icon again.
+    // This will also remove desktop.ini if it's empty post-mutation.
+    set_folder_icon_internal(directory, None)
+}
+
+/// Internal helper for setting or clearing folder icon settings.
+/// If `icon_path_hstr` is Some, sets the icon to that path (relative).
+/// If `icon_path_hstr` is None, clears the icon setting.
+fn set_folder_icon_internal<P: AsRef<Path>>(
+    directory: P,
+    icon_path_hstr: Option<&HSTRING>,
+) -> Result<()> {
+    let psz_icon_ptr = icon_path_hstr.map_or(std::ptr::null_mut(), |h| h.as_ptr() as *mut _);
+
     let mut fcs = SHFOLDERCUSTOMSETTINGS {
         dwSize: std::mem::size_of::<SHFOLDERCUSTOMSETTINGS>() as u32,
         dwMask: FCSM_ICONFILE,
-        pszIconFile: PWSTR(std::ptr::null_mut()),
+        pszIconFile: PWSTR(psz_icon_ptr),
         ..SHFOLDERCUSTOMSETTINGS::default()
     };
 
-    // This will also remove desktop.ini if it's empty post-mutation.
     unsafe {
         SHGetSetFolderCustomSettings(&mut fcs, &HSTRING::from(directory.as_ref()), FCS_FORCEWRITE)
     }
@@ -429,22 +442,58 @@ mod tests {
 
     #[test]
     fn is_generated_icon_matches_prefixed_ico() {
-        assert!(is_generated_icon("icon-sys-1234.ico", "icon-sys"));
+        assert!(is_generated_icon(
+            "icon-sys-550e8400-e29b-41d4-a716-446655440000.ico",
+            "icon-sys"
+        ));
     }
 
     #[test]
     fn is_generated_icon_rejects_wrong_extension() {
-        assert!(!is_generated_icon("icon-sys-1234.png", "icon-sys"));
+        assert!(!is_generated_icon(
+            "icon-sys-550e8400-e29b-41d4-a716-446655440000.png",
+            "icon-sys"
+        ));
     }
 
     #[test]
     fn is_generated_icon_rejects_missing_extension() {
-        assert!(!is_generated_icon("icon-sys-1234", "icon-sys"));
+        assert!(!is_generated_icon(
+            "icon-sys-550e8400-e29b-41d4-a716-446655440000",
+            "icon-sys"
+        ));
     }
 
     #[test]
     fn is_generated_icon_rejects_wrong_prefix() {
-        assert!(!is_generated_icon("other-1234.ico", "icon-sys"));
+        assert!(!is_generated_icon(
+            "other-550e8400-e29b-41d4-a716-446655440000.ico",
+            "icon-sys"
+        ));
+    }
+
+    #[test]
+    fn is_generated_icon_rejects_non_uuid_after_prefix() {
+        // "1234" is not a valid UUID — tests that we extract the UUID portion correctly
+        assert!(!is_generated_icon("icon-sys-1234.ico", "icon-sys"));
+    }
+
+    #[test]
+    fn is_generated_icon_rejects_missing_dash_before_uuid() {
+        // No dash between prefix and UUID
+        assert!(!is_generated_icon(
+            "icon-sys550e8400-e29b-41d4-a716-446655440000.ico",
+            "icon-sys"
+        ));
+    }
+
+    #[test]
+    fn is_generated_icon_rejects_short_prefix_match() {
+        // Prefix "icon" should not match "myicon-..." because the dash check fails
+        assert!(!is_generated_icon(
+            "myicon-550e8400-e29b-41d4-a716-446655440000.ico",
+            "icon"
+        ));
     }
 
     #[test]
