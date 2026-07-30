@@ -305,7 +305,10 @@ mod tests {
         };
         let win_set = WindowsIconSet::try_from(&partial).unwrap();
         assert!(!win_set.is_complete());
-        assert_eq!(win_set.missing_sizes().len(), WindowsIconSize::NUM_SIZES - 1);
+        assert_eq!(
+            win_set.missing_sizes().len(),
+            WindowsIconSize::NUM_SIZES - 1
+        );
     }
 
     #[test]

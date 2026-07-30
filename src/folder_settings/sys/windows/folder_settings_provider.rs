@@ -93,8 +93,8 @@ impl WindowsFolderSettingsProviderExt for WindowsFolderSettingsProvider {
             // If COM initialization fails (e.g., thread already has a different
             // concurrency model), fall back to not blocking known folders rather
             // than panicking.
-            ensure_com_initialized().ok().and_then(|()| {
-                unsafe { CoCreateInstance(&KnownFolderManager, None, CLSCTX_ALL).ok() }
+            ensure_com_initialized().ok().and_then(|()| unsafe {
+                CoCreateInstance(&KnownFolderManager, None, CLSCTX_ALL).ok()
             })
         } else {
             None
@@ -177,10 +177,8 @@ impl WindowsFolderSettingsProvider {
             // operations when the API itself fails.
             const FDE_E_NOTFOUND: u32 = 0x800F0001;
             match unsafe {
-                com_known_folder_manager.FindFolderFromPath(
-                    &HSTRING::from(directory.as_ref()),
-                    FFFP_EXACTMATCH,
-                )
+                com_known_folder_manager
+                    .FindFolderFromPath(&HSTRING::from(directory.as_ref()), FFFP_EXACTMATCH)
             } {
                 Ok(_) => {
                     // Found → it IS a known folder → reject.
@@ -284,7 +282,10 @@ fn encode_to_system<P: AsRef<Path>>(icon_set: &WindowsIconSet, ico_path: P) -> R
     unsafe { SetFileAttributesW(&hstring, FILE_FLAGS_AND_ATTRIBUTES(new_attrs)) }.map_err(|e| {
         WindowsFolderSettingsError::IconOperation(
             ico_path.as_ref().to_path_buf(),
-            format!("Failed to set file attributes for generated icon: {}", e.message()),
+            format!(
+                "Failed to set file attributes for generated icon: {}",
+                e.message()
+            ),
         )
     })?;
 

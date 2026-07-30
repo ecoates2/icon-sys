@@ -64,7 +64,8 @@ fn test_set_folder_icon_svg() {
 
     // Use a minimal SVG; the set path should prefer it over raster.
     let mut icon_set = LinuxIconSet::new();
-    icon_set.set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
+    icon_set
+        .set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
         .expect("Failed to build SVG icon set");
 
     let temp_dir = tempdir().expect("Failed to create temp dir");
