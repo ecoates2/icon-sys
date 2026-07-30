@@ -62,9 +62,10 @@ fn test_set_folder_icon_svg() {
     use icon_sys::icon::sys::linux::LinuxIconSet;
     use tempfile::tempdir;
 
-    // Wrap a raster image as an SVG; the set path should prefer it.
-    let img = image::DynamicImage::new_rgba8(256, 256);
-    let icon_set = LinuxIconSet::from_raster_as_svg(&img).expect("Failed to build SVG icon set");
+    // Use a minimal SVG; the set path should prefer it over raster.
+    let mut icon_set = LinuxIconSet::new();
+    icon_set.set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
+        .expect("Failed to build SVG icon set");
 
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let folder_path = temp_dir.path();

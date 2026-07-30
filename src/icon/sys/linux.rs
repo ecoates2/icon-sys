@@ -1,5 +1,3 @@
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use image::DynamicImage;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -85,30 +83,6 @@ impl<'a> LinuxIconSet<'a> {
     /// The scalable SVG variant, if any.
     pub fn svg(&self) -> Option<&str> {
         self.svg.as_deref()
-    }
-
-    /// Build a scalable, SVG-only set by embedding a raster image inside an SVG.
-    ///
-    /// Stock theme folder icons are vector, so a customized folder set from a
-    /// plain PNG looks subtly off next to them at non-native zoom levels.
-    /// Wrapping the bitmap in an SVG (`<image>` with a `viewBox`) lets the
-    /// desktop scale it like any vector icon, restoring visual parity after
-    /// raster editing ops. No raster sizes are stored; only the SVG.
-    pub fn from_raster_as_svg(image: &DynamicImage) -> Result<LinuxIconSet<'static>, IconError> {
-        let (w, h) = (image.width(), image.height());
-        let mut png = std::io::Cursor::new(Vec::new());
-        image
-            .write_to(&mut png, image::ImageFormat::Png)
-            .map_err(|e| IconError::IconImage(format!("failed to encode PNG: {e}")))?;
-        let data = STANDARD.encode(png.into_inner());
-        let svg = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" \
-             viewBox=\"0 0 {w} {h}\"><image width=\"{w}\" height=\"{h}\" \
-             href=\"data:image/png;base64,{data}\"/></svg>"
-        );
-        let mut set = LinuxIconSet::default();
-        set.set_svg(svg)?;
-        Ok(set)
     }
 
     /// Returns true if the set contains no raster images and no SVG.
@@ -228,17 +202,6 @@ mod tests {
         set.set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
             .unwrap();
         assert!(set.svg().is_some());
-    }
-
-    #[test]
-    fn from_raster_as_svg_produces_valid_embedded_svg() {
-        let set = LinuxIconSet::from_raster_as_svg(&img(64)).unwrap();
-        let svg = set.svg().expect("svg present");
-        assert!(svg.contains("viewBox=\"0 0 64 64\""));
-        assert!(svg.contains("data:image/png;base64,"));
-        // No raster sizes stored; SVG-only.
-        assert!(set.get_image(64).is_none());
-        assert_eq!(set.iter().count(), 0);
     }
 
     #[test]

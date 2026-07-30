@@ -70,5 +70,9 @@ large image is sufficient — file managers scale it for all zoom levels.
 ## License
 MIT OR Apache-2.0
 
+## Resources
+- [**Rust Skills**](https://github.com/leonardomso/rust-skills) — 265 Rust rules across 26 categories for AI coding agents (ownership, error handling, async, concurrency, performance, anti-patterns, etc.)
+- [**Awesome Copilot**](https://github.com/github/awesome-copilot) — Community-curated collection of Copilot customizations: agents, skills, instructions, hooks, workflows, and plugins
+
 ## Status
 **Work in progress.** Not yet published to crates.io. API may change. Windows and Linux are implemented; macOS is planned.
