@@ -1,3 +1,4 @@
+use super::MacOsFolderSettingsError;
 use crate::DefaultFolderIconProvider;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -7,6 +8,6 @@ impl DefaultFolderIconProvider for MacOsDefaultFolderIconProvider {
     fn dump_default_folder_icon(
         &self,
     ) -> Result<crate::api::IconSet, crate::folder_settings::FolderSettingsError> {
-        unimplemented!()
+        Err(MacOsFolderSettingsError::NotImplemented.into())
     }
 }

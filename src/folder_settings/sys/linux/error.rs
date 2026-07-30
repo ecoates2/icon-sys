@@ -12,6 +12,10 @@ pub enum LinuxFolderSettingsError {
     #[error("gio command failed: {0}")]
     Gio(String),
 
+    /// A `gsettings` query failed.
+    #[error("gsettings query failed: {0}")]
+    Gsettings(String),
+
     /// An icon operation on a path failed.
     #[error("{1}")]
     IconOperation(PathBuf, String),

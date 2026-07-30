@@ -36,21 +36,37 @@ impl DefaultFolderIconProvider for LinuxDefaultFolderIconProvider {
     }
 }
 
-/// Resolve the active GNOME icon theme, falling back to `hicolor`.
-fn active_theme() -> String {
-    Command::new("gsettings")
+/// Resolve the active GNOME icon theme via `gsettings`.
+///
+/// Returns an error if `gsettings` is unavailable or returns a non-zero
+/// exit code. The caller is expected to fall back to `hicolor` if
+/// desired.
+fn active_theme() -> std::result::Result<String, LinuxFolderSettingsError> {
+    let output = Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "icon-theme"])
         .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .trim()
-                .trim_matches('\'')
-                .to_string()
-        })
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "hicolor".to_string())
+        .map_err(|e| {
+            LinuxFolderSettingsError::Gsettings(format!("failed to spawn gsettings: {e}"))
+        })?;
+
+    if !output.status.success() {
+        return Err(LinuxFolderSettingsError::Gsettings(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
+    }
+
+    let theme = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .trim_matches('\'')
+        .to_string();
+
+    if theme.is_empty() {
+        return Err(LinuxFolderSettingsError::Gsettings(
+            "gsettings returned an empty theme name".to_string(),
+        ));
+    }
+
+    Ok(theme)
 }
 
 /// Base directories searched for icon themes, in priority order.
@@ -84,7 +100,12 @@ fn svg_candidates(base: &Path, theme: &str) -> Vec<PathBuf> {
 }
 
 fn load_folder_icon_set() -> Result<LinuxIconSet<'static>, LinuxFolderSettingsError> {
-    let theme = active_theme();
+    // Resolve the active theme; fall back to `hicolor` if gsettings fails.
+    let theme = active_theme().unwrap_or_else(|e| {
+        // Log the error via stderr since we have no Result context here.
+        eprintln!("icon-sys: gsettings query failed, falling back to hicolor: {e}");
+        "hicolor".to_string()
+    });
     let bases = theme_base_dirs();
     // Search the detected theme first, then Adwaita (the common GNOME default,
     // present whenever `adwaita-icon-theme` is installed) as a practical

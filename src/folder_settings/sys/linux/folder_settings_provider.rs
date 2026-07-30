@@ -46,19 +46,30 @@ impl LinuxBackend {
 }
 
 /// Map an `XDG_CURRENT_DESKTOP` value to a concrete backend.
+///
+/// `XDG_CURRENT_DESKTOP` can contain multiple colon-separated tokens
+/// (e.g. `"GNOME:Wayland"`), so we split on `:` and check each token
+/// against known desktop environment identifiers. A simple substring
+/// match is avoided because names like `"my-custom-desktop-mate"`
+/// would produce false positives.
+///
+/// Comparison is case-insensitive since `XDG_CURRENT_DESKTOP` values
+/// may vary in casing across distributions.
 fn detect_backend(desktop: &str) -> std::result::Result<LinuxBackend, LinuxFolderSettingsError> {
-    let desktop = desktop.to_ascii_lowercase();
     if desktop.is_empty() {
         return Err(LinuxFolderSettingsError::UndetectedDesktop);
     }
-    if ["gnome", "cinnamon", "mate", "budgie", "unity"]
-        .iter()
-        .any(|de| desktop.contains(de))
+    let gio_tokens = ["gnome", "cinnamon", "mate", "budgie", "unity"];
+    let dirfile_tokens = ["kde", "xfce", "lxqt"];
+    // Check GioMetadata family first (more specific).
+    if desktop
+        .split(':')
+        .any(|token| gio_tokens.contains(&token.to_ascii_lowercase().as_str()))
     {
         Ok(LinuxBackend::GioMetadata)
-    } else if ["kde", "xfce", "lxqt"]
-        .iter()
-        .any(|de| desktop.contains(de))
+    } else if desktop
+        .split(':')
+        .any(|token| dirfile_tokens.contains(&token.to_ascii_lowercase().as_str()))
     {
         Ok(LinuxBackend::DirectoryFile)
     } else {
@@ -137,10 +148,16 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
     ) -> Result<()> {
         self.validate_folder(&path)?;
 
-        match self.backend.resolve()? {
+        let backend = self.backend.resolve()?;
+        match backend {
             LinuxBackend::GioMetadata => self.set_via_gio_metadata(&path, icon_set)?,
             LinuxBackend::DirectoryFile => self.set_via_directory_file(&path, icon_set)?,
-            LinuxBackend::Auto => unreachable!("resolve() never returns Auto"),
+            LinuxBackend::Auto => {
+                return Err(LinuxFolderSettingsError::Error(
+                    "backend was not resolved before use".to_string(),
+                )
+                .into());
+            }
         }
 
         self.maybe_bump_mtime(&path);
@@ -150,10 +167,16 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
     fn reset_icon_for_folder_linux<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         self.validate_folder(&path)?;
 
-        match self.backend.resolve()? {
+        let backend = self.backend.resolve()?;
+        match backend {
             LinuxBackend::GioMetadata => self.reset_via_gio_metadata(&path)?,
             LinuxBackend::DirectoryFile => self.reset_via_directory_file(&path)?,
-            LinuxBackend::Auto => unreachable!("resolve() never returns Auto"),
+            LinuxBackend::Auto => {
+                return Err(LinuxFolderSettingsError::Error(
+                    "backend was not resolved before use".to_string(),
+                )
+                .into());
+            }
         }
 
         self.maybe_bump_mtime(&path);
@@ -390,7 +413,7 @@ mod tests {
 
     #[test]
     fn detect_backend_gnome_family_uses_gio() {
-        for de in ["GNOME", "X-Cinnamon", "MATE", "Budgie:GNOME", "Unity"] {
+        for de in ["GNOME", "Cinnamon", "MATE", "Budgie:GNOME", "Unity"] {
             assert_eq!(detect_backend(de).unwrap(), LinuxBackend::GioMetadata);
         }
     }
@@ -400,6 +423,19 @@ mod tests {
         for de in ["KDE", "XFCE", "LXQt"] {
             assert_eq!(detect_backend(de).unwrap(), LinuxBackend::DirectoryFile);
         }
+    }
+
+    #[test]
+    fn detect_backend_with_session_type() {
+        // XDG_CURRENT_DESKTOP often includes a colon-separated session type.
+        assert_eq!(
+            detect_backend("GNOME:Wayland").unwrap(),
+            LinuxBackend::GioMetadata
+        );
+        assert_eq!(
+            detect_backend("KDE:Wayland").unwrap(),
+            LinuxBackend::DirectoryFile
+        );
     }
 
     #[test]
@@ -420,6 +456,16 @@ mod tests {
     fn detect_backend_unknown_is_error() {
         assert!(matches!(
             detect_backend("Enlightenment"),
+            Err(LinuxFolderSettingsError::UndetectedDesktop)
+        ));
+    }
+
+    #[test]
+    fn detect_backend_rejects_false_positives() {
+        // A desktop whose name contains a known substring as a token should
+        // not match — e.g. "my-custom-desktop-mate" is not the MATE desktop.
+        assert!(matches!(
+            detect_backend("my-custom-desktop-mate"),
             Err(LinuxFolderSettingsError::UndetectedDesktop)
         ));
     }

@@ -181,12 +181,7 @@ impl<'a> TryFrom<&'a crate::api::IconSet> for WindowsIconSet<'a> {
             .iter()
             .map(WindowsIconImage::try_from)
             .collect::<Result<Vec<_>, _>>()?;
-        let windows_icon_set = WindowsIconSet::from_icons(icons)?;
-        let missing = windows_icon_set.missing_sizes();
-        windows_icon_set
-            .is_complete()
-            .then_some(windows_icon_set)
-            .ok_or_else(|| IconError::IconSet(format!("Missing sizes: {:?}", missing)))
+        WindowsIconSet::from_icons(icons)
     }
 }
 
@@ -301,12 +296,16 @@ mod tests {
     }
 
     #[test]
-    fn try_from_iconset_requires_all_sizes() {
+    fn try_from_iconset_accepts_partial_sets() {
+        // The TryFrom impl no longer requires all 8 sizes; partial sets are
+        // accepted. Callers can check completeness explicitly if needed.
         let partial = crate::api::IconSet {
             images: vec![crate::api::IconImage { data: img(16) }],
             svg: None,
         };
-        assert!(WindowsIconSet::try_from(&partial).is_err());
+        let win_set = WindowsIconSet::try_from(&partial).unwrap();
+        assert!(!win_set.is_complete());
+        assert_eq!(win_set.missing_sizes().len(), WindowsIconSize::NUM_SIZES - 1);
     }
 
     #[test]

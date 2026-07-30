@@ -27,10 +27,27 @@ impl From<IconImage> for IconSet {
     }
 }
 
+/// Platform-agnostic icon operations for arbitrary file paths.
+///
+/// Currently only implemented for directories via the
+/// [`FolderSettingsProvider`](crate::folder_settings::FolderSettingsProvider)
+/// trait. The intent is to generalize this trait to cover arbitrary file
+/// types (e.g. setting icons for individual files on Linux via GVFS
+/// `metadata::custom-icon` attributes) once the platform backends
+/// support it.
+///
+/// Until then, use the `folder_settings` module for directory icon
+/// operations. This trait is kept for future API design continuity.
 #[doc(hidden)]
-/// Platform-agnostic icon operations
 pub trait IconProvider {
-    /// Set the icon for a file/directory
+    /// Set the icon for a file or directory.
+    ///
+    /// # Future
+    ///
+    /// On Linux this will eventually operate on any file path via GVFS
+    /// metadata. On Windows, file-level icon setting requires a
+    /// different mechanism than the directory-based `desktop.ini`
+    /// approach used by `FolderSettingsProvider`.
     fn set_icon_for_path<P, I>(&self, path: P, icon_set: &I) -> Result<()>
     where
         P: AsRef<Path>,
