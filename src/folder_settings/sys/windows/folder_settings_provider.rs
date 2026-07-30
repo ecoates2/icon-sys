@@ -32,14 +32,8 @@ use windows::Win32::Storage::FileSystem::{
 const DEFAULT_GENERATED_ICON_PREFIX: &str = env!("CARGO_PKG_NAME");
 
 /// Initializes COM on the currently executing thread.
-///
-/// Returns `Ok(())` on success, or a `WindowsFolderSettingsError::Win32`
-/// if `CoInitializeEx` fails. The most common failure mode is when the
-/// current thread already has a different COM concurrency model set
-/// (e.g. `COINIT_MULTITHREADED`), in which case the error is benign and
-/// the caller may proceed without the known-folder guard.
-fn ensure_com_initialized() -> std::result::Result<(), windows::core::Error> {
-    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+fn ensure_com_initialized() {
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.unwrap();
 }
 
 /// Provides Windows folder icon settings operations
@@ -89,16 +83,10 @@ impl FolderSettingsProvider for WindowsFolderSettingsProvider {
 
 impl WindowsFolderSettingsProviderExt for WindowsFolderSettingsProvider {
     fn new_windows(block_known_folders: bool, generated_icon_prefix: Option<&str>) -> Self {
-        let com_known_folder_manager = if block_known_folders {
-            // If COM initialization fails (e.g., thread already has a different
-            // concurrency model), fall back to not blocking known folders rather
-            // than panicking.
-            ensure_com_initialized().ok().and_then(|()| unsafe {
-                CoCreateInstance(&KnownFolderManager, None, CLSCTX_ALL).ok()
-            })
-        } else {
-            None
-        };
+        let com_known_folder_manager = block_known_folders.then(|| {
+            ensure_com_initialized();
+            unsafe { CoCreateInstance(&KnownFolderManager, None, CLSCTX_ALL) }.unwrap()
+        });
 
         let generated_icon_prefix = if let Some(p) = generated_icon_prefix {
             p.to_owned()
@@ -171,32 +159,20 @@ impl WindowsFolderSettingsProvider {
         })?;
 
         if let Some(com_known_folder_manager) = &self.com_known_folder_manager {
-            // Check that it's not a known folder (e.g. C:\Users\username\Documents).
-            // We only treat the specific "folder not found" error as success;
-            // any other error is propagated so we don't silently allow
-            // operations when the API itself fails.
-            const FDE_E_NOTFOUND: u32 = 0x800F0001;
-            match unsafe {
+            // Check that it's not a known folder. (ex. C:\Users\username\Documents)
+            // TODO: Parse the error and make sure it's a "known folder not found" error and not an "api did something bad" error.
+            unsafe {
                 com_known_folder_manager
                     .FindFolderFromPath(&HSTRING::from(directory.as_ref()), FFFP_EXACTMATCH)
-            } {
-                Ok(_) => {
-                    // Found → it IS a known folder → reject.
-                    return Err(WindowsFolderSettingsError::IconOperation(
-                        directory.as_ref().to_path_buf(),
-                        "Folder is a known folder".to_string(),
-                    ));
-                }
-                Err(e) => {
-                    // Decode the HRESULT; FDE_E_NOTFOUND (0x800F0001) means
-                    // the path is not a known folder, which is what we want.
-                    let hresult = e.code().0;
-                    if hresult != FDE_E_NOTFOUND {
-                        return Err(WindowsFolderSettingsError::Win32(e));
-                    }
-                    // Otherwise the path is not a known folder → proceed.
-                }
             }
+            .is_err()
+            .then_some(())
+            .ok_or_else(|| {
+                WindowsFolderSettingsError::IconOperation(
+                    directory.as_ref().to_path_buf(),
+                    "Folder is a known folder".to_string(),
+                )
+            })?;
         }
 
         Ok(())
@@ -268,26 +244,38 @@ fn encode_to_system<P: AsRef<Path>>(icon_set: &WindowsIconSet, ico_path: P) -> R
     // Write the file
     encode_and_write_ico(ico_frames, &ico_path)?;
 
-    // Mark the icon file as hidden and system so it doesn't appear in Explorer.
-    let hstring = HSTRING::from(ico_path.as_ref());
-    let current_attrs = unsafe { GetFileAttributesW(&hstring) };
-    if current_attrs == INVALID_FILE_ATTRIBUTES {
-        return Err(WindowsFolderSettingsError::IconOperation(
-            ico_path.as_ref().to_path_buf(),
-            "Failed to get file attributes for generated icon".to_string(),
-        ));
-    }
+    // Make the resulting icon file have the hidden and system attributes.
 
-    let new_attrs = current_attrs | (FILE_ATTRIBUTE_HIDDEN.0 | FILE_ATTRIBUTE_SYSTEM.0);
-    unsafe { SetFileAttributesW(&hstring, FILE_FLAGS_AND_ATTRIBUTES(new_attrs)) }.map_err(|e| {
-        WindowsFolderSettingsError::IconOperation(
-            ico_path.as_ref().to_path_buf(),
-            format!(
-                "Failed to set file attributes for generated icon: {}",
-                e.message()
-            ),
-        )
-    })?;
+    let mut new_icon_attribs = FILE_FLAGS_AND_ATTRIBUTES({
+        let mut new_icon_attribs = unsafe { GetFileAttributesW(&HSTRING::from(ico_path.as_ref())) };
+        new_icon_attribs = (new_icon_attribs != INVALID_FILE_ATTRIBUTES)
+            .then_some(new_icon_attribs)
+            .ok_or_else(windows::core::Error::from_thread)
+            .map_err(|e: windows::core::Error| {
+                WindowsFolderSettingsError::IconOperation(
+                    ico_path.as_ref().to_path_buf(),
+                    format!(
+                        "Failed to get file attributes for generated icon: {}",
+                        e.message()
+                    ),
+                )
+            })?;
+        new_icon_attribs
+    });
+
+    new_icon_attribs |= FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM;
+
+    unsafe { SetFileAttributesW(&HSTRING::from(ico_path.as_ref()), new_icon_attribs) }.map_err(
+        |e| {
+            WindowsFolderSettingsError::IconOperation(
+                ico_path.as_ref().to_path_buf(),
+                format!(
+                    "Failed to set file attributes for generated icon: {}",
+                    e.message()
+                ),
+            )
+        },
+    )?;
 
     Ok(())
 }
