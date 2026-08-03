@@ -72,8 +72,32 @@ impl<'a> LinuxIconSet<'a> {
     }
 
     /// Set the scalable SVG variant, validating it with `usvg` before storing.
+    ///
+    /// The SVG must have an `<svg>` root element with the correct
+    /// `xmlns` attribute (`http://www.w3.org/2000/svg`). This prevents
+    /// non-SVG XML from being stored as an icon.
     pub fn set_svg(&mut self, svg: impl Into<String>) -> Result<(), IconError> {
         let svg = svg.into();
+        // Check that the root element is <svg> with the correct namespace
+        // before parsing. This prevents non-SVG XML from being stored.
+        let trimmed = svg.trim();
+        if !trimmed.starts_with('<')
+            || !trimmed[1..]
+                .find('>')
+                .map(|end| {
+                    let root = &trimmed[1..end];
+                    let root_name = root
+                        .split(|c: char| c.is_whitespace() || c == '/')
+                        .next()
+                        .unwrap_or("");
+                    root_name == "svg" && trimmed.contains("xmlns=\"http://www.w3.org/2000/svg\"")
+                })
+                .unwrap_or(false)
+        {
+            return Err(IconError::IconImage(
+                "SVG must have an <svg> root element with xmlns attribute".to_string(),
+            ));
+        }
         usvg::Tree::from_str(&svg, &usvg::Options::default())
             .map_err(|e| IconError::IconImage(format!("invalid SVG: {e}")))?;
         self.svg = Some(svg);
@@ -193,6 +217,20 @@ mod tests {
     fn set_svg_rejects_garbage() {
         let mut set = LinuxIconSet::new();
         assert!(set.set_svg("not an svg").is_err());
+        assert!(set.svg().is_none());
+    }
+
+    #[test]
+    fn set_svg_rejects_non_svg_xml() {
+        let mut set = LinuxIconSet::new();
+        assert!(set.set_svg("<xml><foo/></xml>").is_err());
+        assert!(set.svg().is_none());
+    }
+
+    #[test]
+    fn set_svg_rejects_svg_without_namespace() {
+        let mut set = LinuxIconSet::new();
+        assert!(set.set_svg("<svg width=\"1\" height=\"1\"/>").is_err());
         assert!(set.svg().is_none());
     }
 

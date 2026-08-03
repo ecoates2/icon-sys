@@ -32,17 +32,41 @@ pub enum LinuxBackend {
     DirectoryFile,
 }
 
+/// Internal representation: a resolved backend with optional gio availability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolvedBackend {
+    GioMetadata,
+    DirectoryFile,
+}
+
 impl LinuxBackend {
     /// Resolve `Auto` into a concrete backend using `XDG_CURRENT_DESKTOP`.
-    fn resolve(self) -> std::result::Result<Self, LinuxFolderSettingsError> {
+    fn resolve(self) -> std::result::Result<ResolvedBackend, LinuxFolderSettingsError> {
         match self {
             LinuxBackend::Auto => {
                 let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
                 detect_backend(&desktop)
             }
-            other => Ok(other),
+            LinuxBackend::GioMetadata => {
+                // Check if gio is available; return an error if not so the
+                // user gets a clear message rather than a silent failure.
+                if !gio_available() {
+                    return Err(LinuxFolderSettingsError::GioNotFound);
+                }
+                Ok(ResolvedBackend::GioMetadata)
+            }
+            LinuxBackend::DirectoryFile => Ok(ResolvedBackend::DirectoryFile),
         }
     }
+}
+
+/// Check whether the `gio` binary is available on PATH.
+fn gio_available() -> bool {
+    Command::new("gio")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Map an `XDG_CURRENT_DESKTOP` value to a concrete backend.
@@ -55,23 +79,25 @@ impl LinuxBackend {
 ///
 /// Comparison is case-insensitive since `XDG_CURRENT_DESKTOP` values
 /// may vary in casing across distributions.
-fn detect_backend(desktop: &str) -> std::result::Result<LinuxBackend, LinuxFolderSettingsError> {
+fn detect_backend(desktop: &str) -> std::result::Result<ResolvedBackend, LinuxFolderSettingsError> {
     if desktop.is_empty() {
         return Err(LinuxFolderSettingsError::UndetectedDesktop);
     }
-    let gio_tokens = ["gnome", "cinnamon", "mate", "budgie", "unity"];
+
+    let has_token = |tokens: &[&str]| {
+        desktop
+            .split(':')
+            .any(|token| tokens.contains(&token.to_ascii_lowercase().as_str()))
+    };
+
+    let gio_tokens = ["gnome", "cinnamon", "mate", "budgie", "unity", "pantheon"];
     let dirfile_tokens = ["kde", "xfce", "lxqt"];
+
     // Check GioMetadata family first (more specific).
-    if desktop
-        .split(':')
-        .any(|token| gio_tokens.contains(&token.to_ascii_lowercase().as_str()))
-    {
-        Ok(LinuxBackend::GioMetadata)
-    } else if desktop
-        .split(':')
-        .any(|token| dirfile_tokens.contains(&token.to_ascii_lowercase().as_str()))
-    {
-        Ok(LinuxBackend::DirectoryFile)
+    if has_token(&gio_tokens) {
+        Ok(ResolvedBackend::GioMetadata)
+    } else if has_token(&dirfile_tokens) {
+        Ok(ResolvedBackend::DirectoryFile)
     } else {
         Err(LinuxFolderSettingsError::UndetectedDesktop)
     }
@@ -100,7 +126,7 @@ pub trait LinuxFolderSettingsProviderExt {
 
 #[derive(Debug, Clone)]
 pub struct LinuxFolderSettingsProvider {
-    backend: LinuxBackend,
+    backend: ResolvedBackend,
     generated_icon_prefix: String,
     bump_mtime: bool,
 }
@@ -134,8 +160,19 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
             .map(|p| p.to_owned())
             .unwrap_or_else(|| DEFAULT_GENERATED_ICON_PREFIX.to_owned());
 
+        // Resolve the backend once at construction time so we don't
+        // re-detect on every operation.
+        let backend = backend.resolve();
+
         Self {
-            backend,
+            backend: backend.unwrap_or_else(|e| {
+                // Log the failure; fall back to DirectoryFile which has
+                // no external dependencies. GioMetadata requires the gio CLI.
+                log::warn!(
+                    "icon-sys: backend resolution failed, falling back to DirectoryFile: {e}"
+                );
+                ResolvedBackend::DirectoryFile
+            }),
             generated_icon_prefix,
             bump_mtime,
         }
@@ -148,16 +185,9 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
     ) -> Result<()> {
         self.validate_folder(&path)?;
 
-        let backend = self.backend.resolve()?;
-        match backend {
-            LinuxBackend::GioMetadata => self.set_via_gio_metadata(&path, icon_set)?,
-            LinuxBackend::DirectoryFile => self.set_via_directory_file(&path, icon_set)?,
-            LinuxBackend::Auto => {
-                return Err(LinuxFolderSettingsError::Error(
-                    "backend was not resolved before use".to_string(),
-                )
-                .into());
-            }
+        match self.backend {
+            ResolvedBackend::GioMetadata => self.set_via_gio_metadata(&path, icon_set)?,
+            ResolvedBackend::DirectoryFile => self.set_via_directory_file(&path, icon_set)?,
         }
 
         self.maybe_bump_mtime(&path);
@@ -167,16 +197,9 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
     fn reset_icon_for_folder_linux<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         self.validate_folder(&path)?;
 
-        let backend = self.backend.resolve()?;
-        match backend {
-            LinuxBackend::GioMetadata => self.reset_via_gio_metadata(&path)?,
-            LinuxBackend::DirectoryFile => self.reset_via_directory_file(&path)?,
-            LinuxBackend::Auto => {
-                return Err(LinuxFolderSettingsError::Error(
-                    "backend was not resolved before use".to_string(),
-                )
-                .into());
-            }
+        match self.backend {
+            ResolvedBackend::GioMetadata => self.reset_via_gio_metadata(&path)?,
+            ResolvedBackend::DirectoryFile => self.reset_via_directory_file(&path)?,
         }
 
         self.maybe_bump_mtime(&path);
@@ -223,7 +246,7 @@ impl LinuxFolderSettingsProvider {
         let icon_path = self.write_generated_icon(&path, icon_set)?;
         // `gio` stores the custom icon as an absolute `file://` URI.
         let uri = format!("file://{}", icon_path.display());
-        gio_set_metadata(&path, "metadata::custom-icon", Some(&uri))?;
+        gio_set_metadata(path.as_ref(), "metadata::custom-icon", Some(&uri))?;
         Ok(())
     }
 
@@ -231,7 +254,7 @@ impl LinuxFolderSettingsProvider {
         &self,
         path: P,
     ) -> std::result::Result<(), LinuxFolderSettingsError> {
-        gio_set_metadata(&path, "metadata::custom-icon", None)?;
+        gio_set_metadata(path.as_ref(), "metadata::custom-icon", None)?;
         self.remove_generated_icons(&path)?;
         Ok(())
     }
@@ -248,7 +271,20 @@ impl LinuxFolderSettingsProvider {
 
         let directory_path = path.as_ref().join(".directory");
         // Load existing entry if present so other settings are preserved.
-        let mut conf = ini::Ini::load_from_file(&directory_path).unwrap_or_default();
+        // If the file doesn't exist yet (first time setting an icon),
+        // start with a fresh INI. Only treat parse errors as failures.
+        let mut conf = match ini::Ini::load_from_file(&directory_path) {
+            Ok(conf) => conf,
+            Err(ini::Error::Io(ref e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                ini::Ini::new()
+            }
+            Err(e) => {
+                return Err(LinuxFolderSettingsError::DirectoryFileParse(
+                    directory_path.clone(),
+                    e.to_string(),
+                ));
+            }
+        };
         // `icon_path` is absolute so file managers treat it as a file rather
         // than an icon-theme name.
         conf.with_section(Some("Desktop Entry"))
@@ -264,7 +300,9 @@ impl LinuxFolderSettingsProvider {
     ) -> std::result::Result<(), LinuxFolderSettingsError> {
         let directory_path = path.as_ref().join(".directory");
         if directory_path.exists() {
-            let conf = ini::Ini::load_from_file(&directory_path).unwrap_or_default();
+            let conf = ini::Ini::load_from_file(&directory_path).map_err(|e| {
+                LinuxFolderSettingsError::DirectoryFileParse(directory_path.clone(), e.to_string())
+            })?;
             match strip_icon_entry(conf) {
                 // Rewrite with remaining settings preserved...
                 Some(conf) => conf.write_to_file(&directory_path)?,
@@ -307,7 +345,12 @@ impl LinuxFolderSettingsProvider {
                 self.generated_icon_prefix,
                 Uuid::new_v4()
             ));
-            fs::write(&icon_path, svg).map_err(|e| {
+            // Write to a temp file first, then rename for atomicity.
+            let tmp_path = icon_path.with_extension("svg.tmp");
+            fs::write(&tmp_path, svg).map_err(|e| {
+                LinuxFolderSettingsError::IconOperation(icon_path.clone(), e.to_string())
+            })?;
+            fs::rename(&tmp_path, &icon_path).map_err(|e| {
                 LinuxFolderSettingsError::IconOperation(icon_path.clone(), e.to_string())
             })?;
             return Ok(icon_path);
@@ -345,7 +388,10 @@ impl LinuxFolderSettingsProvider {
                 && let Some(name) = p.file_name().and_then(|n| n.to_str())
                 && name.starts_with(&self.generated_icon_prefix)
             {
-                fs::remove_file(p)?;
+                // Ignore NotFound errors to avoid TOCTOU race conditions
+                // where another process deletes the file between read_dir
+                // and remove_file.
+                let _ = fs::remove_file(p);
             }
         }
         Ok(())
@@ -358,7 +404,7 @@ impl LinuxFolderSettingsProvider {
 ///
 /// Kept free of filesystem access so the preserve-vs-delete decision can be
 /// unit-tested directly.
-fn strip_icon_entry(mut conf: ini::Ini) -> Option<ini::Ini> {
+pub fn strip_icon_entry(mut conf: ini::Ini) -> Option<ini::Ini> {
     // Surgically drop only the Icon key, keeping other settings.
     conf.with_section(Some("Desktop Entry")).delete(&"Icon");
 
@@ -395,33 +441,47 @@ fn gio_set_metadata<P: AsRef<Path>>(
         cmd.arg(value);
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| LinuxFolderSettingsError::Gio(format!("failed to spawn gio: {e}")))?;
+    let output = cmd.output().map_err(|e| LinuxFolderSettingsError::Gio {
+        path: path.as_ref().to_path_buf(),
+        key: key.to_string(),
+        value: value.map(|v| v.to_string()),
+        detail: format!("failed to spawn gio: {e}"),
+    })?;
 
     if !output.status.success() {
-        return Err(LinuxFolderSettingsError::Gio(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+        return Err(LinuxFolderSettingsError::Gio {
+            path: path.as_ref().to_path_buf(),
+            key: key.to_string(),
+            value: value.map(|v| v.to_string()),
+            detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::default_folder_icon_provider::fallback_theme_for;
     use super::*;
 
     #[test]
     fn detect_backend_gnome_family_uses_gio() {
-        for de in ["GNOME", "Cinnamon", "MATE", "Budgie:GNOME", "Unity"] {
-            assert_eq!(detect_backend(de).unwrap(), LinuxBackend::GioMetadata);
+        for de in [
+            "GNOME",
+            "Cinnamon",
+            "MATE",
+            "Budgie:GNOME",
+            "Unity",
+            "Pantheon",
+        ] {
+            assert_eq!(detect_backend(de).unwrap(), ResolvedBackend::GioMetadata);
         }
     }
 
     #[test]
     fn detect_backend_kde_family_uses_directory_file() {
         for de in ["KDE", "XFCE", "LXQt"] {
-            assert_eq!(detect_backend(de).unwrap(), LinuxBackend::DirectoryFile);
+            assert_eq!(detect_backend(de).unwrap(), ResolvedBackend::DirectoryFile);
         }
     }
 
@@ -430,18 +490,24 @@ mod tests {
         // XDG_CURRENT_DESKTOP often includes a colon-separated session type.
         assert_eq!(
             detect_backend("GNOME:Wayland").unwrap(),
-            LinuxBackend::GioMetadata
+            ResolvedBackend::GioMetadata
         );
         assert_eq!(
             detect_backend("KDE:Wayland").unwrap(),
-            LinuxBackend::DirectoryFile
+            ResolvedBackend::DirectoryFile
         );
     }
 
     #[test]
     fn detect_backend_is_case_insensitive() {
-        assert_eq!(detect_backend("gnome").unwrap(), LinuxBackend::GioMetadata);
-        assert_eq!(detect_backend("kde").unwrap(), LinuxBackend::DirectoryFile);
+        assert_eq!(
+            detect_backend("gnome").unwrap(),
+            ResolvedBackend::GioMetadata
+        );
+        assert_eq!(
+            detect_backend("kde").unwrap(),
+            ResolvedBackend::DirectoryFile
+        );
     }
 
     #[test]
@@ -471,15 +537,55 @@ mod tests {
     }
 
     #[test]
-    fn explicit_backend_resolves_to_itself() {
-        assert_eq!(
-            LinuxBackend::GioMetadata.resolve().unwrap(),
-            LinuxBackend::GioMetadata
-        );
+    fn explicit_directory_file_backend_resolves_to_itself() {
         assert_eq!(
             LinuxBackend::DirectoryFile.resolve().unwrap(),
-            LinuxBackend::DirectoryFile
+            ResolvedBackend::DirectoryFile
         );
+    }
+
+    #[test]
+    fn explicit_gio_backend_resolves_when_gio_available() {
+        // GioMetadata resolution depends on gio being on PATH.
+        // If gio is available, it should resolve; otherwise it returns GioNotFound.
+        let result = LinuxBackend::GioMetadata.resolve();
+        if gio_available() {
+            assert_eq!(result.unwrap(), ResolvedBackend::GioMetadata);
+        } else {
+            assert!(matches!(result, Err(LinuxFolderSettingsError::GioNotFound)));
+        }
+    }
+
+    #[test]
+    fn fallback_theme_for_kde_returns_breeze() {
+        assert_eq!(fallback_theme_for("KDE"), "Breeze");
+        assert_eq!(fallback_theme_for("KDE:Wayland"), "Breeze");
+        assert_eq!(fallback_theme_for("plasma"), "Breeze");
+    }
+
+    #[test]
+    fn fallback_theme_for_xfce_returns_xfce_wallpaper() {
+        assert_eq!(fallback_theme_for("XFCE"), "Xfce-wallpaper");
+        assert_eq!(fallback_theme_for("xfce"), "Xfce-wallpaper");
+    }
+
+    #[test]
+    fn fallback_theme_for_lxqt_returns_lubuntu() {
+        assert_eq!(fallback_theme_for("LXQt"), "lubuntu");
+        assert_eq!(fallback_theme_for("lxqt"), "lubuntu");
+    }
+
+    #[test]
+    fn fallback_theme_for_gnome_returns_adwaita() {
+        assert_eq!(fallback_theme_for("GNOME"), "Adwaita");
+        assert_eq!(fallback_theme_for("cinnamon"), "Adwaita");
+        assert_eq!(fallback_theme_for("MATE"), "Adwaita");
+    }
+
+    #[test]
+    fn fallback_theme_for_unknown_returns_hicolor() {
+        assert_eq!(fallback_theme_for("Enlightenment"), "hicolor");
+        assert_eq!(fallback_theme_for(""), "hicolor");
     }
 
     fn ini_of(s: &str) -> ini::Ini {
