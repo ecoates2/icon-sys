@@ -268,7 +268,7 @@ fn icon_to_rgba_image(
 /// Any trailing bytes that do not form a complete 4-byte pixel are left
 /// untouched.
 fn swap_bgra_to_rgba(pixels: &mut [u8]) {
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
 }
