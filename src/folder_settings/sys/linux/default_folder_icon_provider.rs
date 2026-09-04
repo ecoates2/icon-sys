@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,6 +12,14 @@ use crate::icon::sys::linux::{LinuxIconImage, LinuxIconSet};
 const COMMON_SIZES: [u32; 15] = [
     16, 20, 22, 24, 32, 36, 40, 48, 64, 72, 96, 128, 192, 256, 512,
 ];
+
+/// Theme searched after the detected and desktop-specific themes.
+///
+/// `hicolor` is the freedesktop-mandated last resort but ships no `folder`
+/// icon, so headless environments (CI, containers, remote shells) would
+/// otherwise find nothing at all. Adwaita is the GTK reference theme and is
+/// present on effectively every desktop Linux install.
+const UNIVERSAL_FALLBACK_THEME: &str = "Adwaita";
 
 pub trait LinuxDefaultFolderIconProviderExt {
     /// Dump the default folder icon from the active icon theme.
@@ -226,6 +235,54 @@ fn svg_candidates(base: &Path, theme: &str) -> Vec<PathBuf> {
     ]
 }
 
+/// Themes listed in a theme's `Inherits` key, in declaration order.
+///
+/// Returns an empty vector when the theme has no readable `index.theme` or
+/// declares no parents.
+fn inherited_themes(bases: &[PathBuf], theme: &str) -> Vec<String> {
+    for base in bases {
+        let Ok(index) = ini::Ini::load_from_file(base.join(theme).join("index.theme")) else {
+            continue;
+        };
+        let Some(inherits) = index
+            .section(Some("Icon Theme"))
+            .and_then(|s| s.get("Inherits"))
+        else {
+            continue;
+        };
+        return inherits
+            .split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .collect();
+    }
+    Vec::new()
+}
+
+/// Expand seed themes into the full search order by walking each theme's
+/// `Inherits` chain breadth-first, as required by the freedesktop icon theme
+/// specification. Duplicates are dropped and `hicolor` is always last.
+fn theme_search_order(bases: &[PathBuf], seeds: &[&str]) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    let mut queue: VecDeque<String> = seeds
+        .iter()
+        .filter(|t| !t.is_empty())
+        .map(|t| (*t).to_string())
+        .collect();
+
+    while let Some(theme) = queue.pop_front() {
+        if theme == "hicolor" || order.contains(&theme) {
+            continue;
+        }
+        queue.extend(inherited_themes(bases, &theme));
+        order.push(theme);
+    }
+
+    order.push("hicolor".to_string());
+    order
+}
+
 /// Map a desktop environment identifier to its preferred fallback icon theme.
 pub(super) fn fallback_theme_for(desktop: &str) -> &'static str {
     let desktop = desktop.to_ascii_lowercase();
@@ -260,9 +317,12 @@ fn load_folder_icon_set() -> Result<LinuxIconSet<'static>, LinuxFolderSettingsEr
     });
     let bases = theme_base_dirs();
     // Search the detected theme first, then the DE-specific fallback
-    // (e.g. Adwaita for GNOME, Breeze for KDE), and finally `hicolor` as
-    // the freedesktop-mandated last resort.
-    let themes = [theme.as_str(), fallback_theme, "hicolor"];
+    // (e.g. Adwaita for GNOME, Breeze for KDE), each expanded through its
+    // `Inherits` chain, and finally `hicolor`.
+    let themes = theme_search_order(
+        &bases,
+        &[theme.as_str(), fallback_theme, UNIVERSAL_FALLBACK_THEME],
+    );
 
     let mut set = LinuxIconSet::new();
 
@@ -270,7 +330,7 @@ fn load_folder_icon_set() -> Result<LinuxIconSet<'static>, LinuxFolderSettingsEr
         if set.get_image(size).is_some() {
             continue;
         }
-        'found: for theme in themes {
+        'found: for theme in &themes {
             for base in &bases {
                 for candidate in raster_candidates(base, theme, size) {
                     if candidate.exists()
@@ -288,7 +348,7 @@ fn load_folder_icon_set() -> Result<LinuxIconSet<'static>, LinuxFolderSettingsEr
     }
 
     if set.svg().is_none() {
-        'svg: for theme in themes {
+        'svg: for theme in &themes {
             for base in &bases {
                 for candidate in svg_candidates(base, theme) {
                     if let Ok(svg) = std::fs::read_to_string(&candidate) {
@@ -309,4 +369,72 @@ fn load_folder_icon_set() -> Result<LinuxIconSet<'static>, LinuxFolderSettingsEr
     }
 
     Ok(set)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create `<base>/<theme>/index.theme` with the given `Inherits` value.
+    fn write_theme(base: &Path, theme: &str, inherits: Option<&str>) {
+        let dir = base.join(theme);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut contents = String::from("[Icon Theme]\nName=Test\n");
+        if let Some(inherits) = inherits {
+            contents.push_str(&format!("Inherits={inherits}\n"));
+        }
+        std::fs::write(dir.join("index.theme"), contents).unwrap();
+    }
+
+    #[test]
+    fn inherited_themes_reads_inherits_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_theme(tmp.path(), "Adwaita", Some("AdwaitaLegacy, hicolor"));
+        let bases = vec![tmp.path().to_path_buf()];
+
+        assert_eq!(
+            inherited_themes(&bases, "Adwaita"),
+            vec!["AdwaitaLegacy".to_string(), "hicolor".to_string()]
+        );
+    }
+
+    #[test]
+    fn inherited_themes_is_empty_without_index_or_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_theme(tmp.path(), "Standalone", None);
+        let bases = vec![tmp.path().to_path_buf()];
+
+        assert!(inherited_themes(&bases, "Standalone").is_empty());
+        assert!(inherited_themes(&bases, "Missing").is_empty());
+    }
+
+    #[test]
+    fn theme_search_order_expands_inheritance_and_ends_with_hicolor() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_theme(tmp.path(), "Adwaita", Some("AdwaitaLegacy,hicolor"));
+        write_theme(tmp.path(), "AdwaitaLegacy", Some("hicolor"));
+        let bases = vec![tmp.path().to_path_buf()];
+
+        assert_eq!(
+            theme_search_order(&bases, &["Adwaita", "", "Adwaita"]),
+            vec![
+                "Adwaita".to_string(),
+                "AdwaitaLegacy".to_string(),
+                "hicolor".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn theme_search_order_survives_inheritance_cycles() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_theme(tmp.path(), "A", Some("B"));
+        write_theme(tmp.path(), "B", Some("A"));
+        let bases = vec![tmp.path().to_path_buf()];
+
+        assert_eq!(
+            theme_search_order(&bases, &["A"]),
+            vec!["A".to_string(), "B".to_string(), "hicolor".to_string()]
+        );
+    }
 }

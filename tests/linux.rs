@@ -156,7 +156,7 @@ fn test_reset_folder_icon() {
 }
 
 #[test]
-fn test_gio_metadata_backend_returns_error_when_gio_unavailable() {
+fn test_gio_metadata_backend_matches_environment_support() {
     use icon_sys::folder_settings::sys::linux::{
         LinuxBackend, LinuxFolderSettingsProvider, LinuxFolderSettingsProviderExt,
     };
@@ -174,22 +174,45 @@ fn test_gio_metadata_backend_returns_error_when_gio_unavailable() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let folder_path = temp_dir.path();
 
-    // GioMetadata backend should fail if gio is not available.
+    // GioMetadata backend should only succeed where gio metadata is writable.
     let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::GioMetadata, None, false);
     let result = provider.set_icon_for_folder_linux(folder_path, &icon_set);
 
-    // If gio is available, the test should pass; otherwise it should
-    // fail with a GioNotFound error.
     let has_gio = std::process::Command::new("gio")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
 
-    if has_gio {
+    // The `gio` binary alone is not enough: writing `metadata::*` needs the
+    // GVFS metadata daemon on the session bus, which headless environments
+    // (CI, containers) lack. Probe an actual write rather than `gio --version`.
+    let probe_dir = tempdir().expect("Failed to create temp dir");
+    let gio_metadata_writable = has_gio
+        && std::process::Command::new("gio")
+            .args(["set", "-t", "string"])
+            .arg(probe_dir.path())
+            .args(["metadata::custom-icon", "probe"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+    if !has_gio {
+        // Backend resolution falls back to the `.directory` file when gio
+        // is missing, so the operation still succeeds.
         assert!(
             result.is_ok(),
-            "GioMetadata backend should work when gio is available: {:?}",
+            "Backend should fall back to .directory when gio is absent: {:?}",
+            result.err()
+        );
+        assert!(
+            folder_path.join(".directory").exists(),
+            ".directory file should be created by the fallback backend"
+        );
+    } else if gio_metadata_writable {
+        assert!(
+            result.is_ok(),
+            "GioMetadata backend should work when gio metadata is writable: {:?}",
             result.err()
         );
         // Clean up
@@ -199,7 +222,7 @@ fn test_gio_metadata_backend_returns_error_when_gio_unavailable() {
     } else {
         assert!(
             result.is_err(),
-            "GioMetadata backend should fail when gio is not available"
+            "GioMetadata backend should fail when gio metadata is not writable"
         );
     }
 }
