@@ -279,7 +279,7 @@ fn test_remove_generated_icons_does_not_delete_similar_files() {
             p.extension().and_then(|x| x.to_str()) == Some("svg")
                 && p.file_name()
                     .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("icon-sys-"))
+                    .is_some_and(|n| n.starts_with(".icon-sys-"))
         })
         .collect();
     assert!(
