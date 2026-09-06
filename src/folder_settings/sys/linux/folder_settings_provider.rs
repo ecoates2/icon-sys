@@ -340,8 +340,10 @@ impl LinuxFolderSettingsProvider {
         })?;
 
         if let Some(svg) = icon_set.svg() {
+            // Dotfile prefix ensures the generated icon is hidden by default
+            // in all Linux file managers (Nautilus, Dolphin, Thunar, etc.).
             let icon_path = dir.join(format!(
-                "{}-{}.svg",
+                ".{}-{}.svg",
                 self.generated_icon_prefix,
                 Uuid::new_v4()
             ));
@@ -363,7 +365,7 @@ impl LinuxFolderSettingsProvider {
             )
         })?;
         let icon_path = dir.join(format!(
-            "{}-{}.png",
+            ".{}-{}.png",
             self.generated_icon_prefix,
             Uuid::new_v4()
         ));
@@ -386,7 +388,7 @@ impl LinuxFolderSettingsProvider {
                 .is_some_and(|e| GENERATED_ICON_EXTENSIONS.contains(&e));
             if has_generated_ext
                 && let Some(name) = p.file_name().and_then(|n| n.to_str())
-                && name.starts_with(&self.generated_icon_prefix)
+                && name.starts_with(&format!(".{}", self.generated_icon_prefix))
             {
                 // Ignore NotFound errors to avoid TOCTOU race conditions
                 // where another process deletes the file between read_dir
