@@ -107,11 +107,7 @@ fn detect_backend(desktop: &str) -> std::result::Result<ResolvedBackend, LinuxFo
 pub trait LinuxFolderSettingsProviderExt {
     /// Construct with an explicit backend choice and optional prefix for
     /// generated icon files. Pass `None` to use the default prefix.
-    fn new_linux(
-        backend: LinuxBackend,
-        generated_icon_prefix: Option<&str>,
-        bump_mtime: bool,
-    ) -> Self;
+    fn new_linux(backend: LinuxBackend, generated_icon_prefix: Option<&str>) -> Self;
 
     /// Set the icon for a folder using a Linux icon set.
     fn set_icon_for_folder_linux<P: AsRef<Path>>(
@@ -128,12 +124,11 @@ pub trait LinuxFolderSettingsProviderExt {
 pub struct LinuxFolderSettingsProvider {
     backend: ResolvedBackend,
     generated_icon_prefix: String,
-    bump_mtime: bool,
 }
 
 impl FolderSettingsProvider for LinuxFolderSettingsProvider {
     fn new() -> Self {
-        LinuxFolderSettingsProvider::new_linux(LinuxBackend::Auto, None, true)
+        LinuxFolderSettingsProvider::new_linux(LinuxBackend::Auto, None)
     }
 
     fn set_icon_for_folder<P: AsRef<std::path::Path>>(
@@ -151,11 +146,7 @@ impl FolderSettingsProvider for LinuxFolderSettingsProvider {
 }
 
 impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
-    fn new_linux(
-        backend: LinuxBackend,
-        generated_icon_prefix: Option<&str>,
-        bump_mtime: bool,
-    ) -> Self {
+    fn new_linux(backend: LinuxBackend, generated_icon_prefix: Option<&str>) -> Self {
         let generated_icon_prefix = generated_icon_prefix
             .map(|p| p.to_owned())
             .unwrap_or_else(|| DEFAULT_GENERATED_ICON_PREFIX.to_owned());
@@ -174,7 +165,6 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
                 ResolvedBackend::DirectoryFile
             }),
             generated_icon_prefix,
-            bump_mtime,
         }
     }
 
@@ -190,7 +180,7 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
             ResolvedBackend::DirectoryFile => self.set_via_directory_file(&path, icon_set)?,
         }
 
-        self.maybe_bump_mtime(&path);
+        bump_mtime(&path);
         Ok(())
     }
 
@@ -202,21 +192,19 @@ impl LinuxFolderSettingsProviderExt for LinuxFolderSettingsProvider {
             ResolvedBackend::DirectoryFile => self.reset_via_directory_file(&path)?,
         }
 
-        self.maybe_bump_mtime(&path);
+        bump_mtime(&path);
         Ok(())
     }
 }
 
-impl LinuxFolderSettingsProvider {
-    /// Nudge file-manager monitors to refresh by bumping the folder's mtime.
-    /// Best-effort: failures are ignored since the icon change still applies.
-    fn maybe_bump_mtime<P: AsRef<Path>>(&self, path: P) {
-        if self.bump_mtime {
-            let now = filetime::FileTime::now();
-            let _ = filetime::set_file_mtime(path.as_ref(), now);
-        }
-    }
+/// Nudge file-manager monitors to refresh by bumping the folder's mtime.
+/// Best-effort: failures are ignored since the icon change still applies.
+fn bump_mtime<P: AsRef<Path>>(path: P) {
+    let now = filetime::FileTime::now();
+    let _ = filetime::set_file_mtime(path.as_ref(), now);
+}
 
+impl LinuxFolderSettingsProvider {
     fn validate_folder<P: AsRef<Path>>(&self, directory: P) -> Result<()> {
         let dir = directory.as_ref();
         if !dir.exists() {

@@ -42,7 +42,7 @@ fn test_set_folder_icon() {
     let folder_path = temp_dir.path();
 
     // Use the .directory backend so the test is deterministic without gio.
-    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None, false);
+    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None);
     let result = provider.set_icon_for_folder_linux(folder_path, &icon_set);
     assert!(
         result.is_ok(),
@@ -71,7 +71,7 @@ fn test_set_folder_icon_svg() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let folder_path = temp_dir.path();
 
-    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None, false);
+    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None);
     provider
         .set_icon_for_folder_linux(folder_path, &icon_set)
         .expect("Failed to set SVG folder icon");
@@ -129,7 +129,7 @@ fn test_reset_folder_icon() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let folder_path = temp_dir.path();
 
-    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None, false);
+    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None);
     provider
         .set_icon_for_folder_linux(folder_path, &icon_set)
         .expect("Failed to set folder icon");
@@ -175,7 +175,7 @@ fn test_gio_metadata_backend_matches_environment_support() {
     let folder_path = temp_dir.path();
 
     // GioMetadata backend should only succeed where gio metadata is writable.
-    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::GioMetadata, None, false);
+    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::GioMetadata, None);
     let result = provider.set_icon_for_folder_linux(folder_path, &icon_set);
 
     let has_gio = std::process::Command::new("gio")
@@ -246,7 +246,7 @@ fn test_remove_generated_icons_does_not_delete_similar_files() {
         .set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
         .expect("Failed to build SVG icon set");
 
-    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None, false);
+    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None);
     provider
         .set_icon_for_folder_linux(folder_path, &icon_set)
         .expect("set_icon_for_folder_linux should succeed");
@@ -306,7 +306,7 @@ fn test_directory_file_parse_error_on_malformed_file() {
     )
     .unwrap();
 
-    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None, false);
+    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None);
     let result = provider.set_icon_for_folder_linux(folder_path, &icon_set);
 
     assert!(
@@ -346,7 +346,7 @@ fn test_reset_preserves_other_settings_in_directory_file() {
     )
     .unwrap();
 
-    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None, false);
+    let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None);
     provider
         .set_icon_for_folder_linux(folder_path, &icon_set)
         .expect("Failed to set folder icon");

@@ -38,6 +38,43 @@ let default_folder_icon_provider = WindowsDefaultFolderIconProvider;
 let windows_icon_set = default_folder_icon_provider.dump_default_folder_icon_windows().unwrap();
 ```
 
+`WindowsFolderSettingsProvider` sets and resets custom folder icons. Setting an icon writes the icon set to a
+hidden, system-attributed `{prefix}-{uuid}.ico` inside the folder and points the folder's `desktop.ini` at it
+(via `SHGetSetFolderCustomSettings`). A fresh UUID is used each time so Explorer's icon cache picks up the change.
+Resetting removes the icon entry from `desktop.ini` (deleting the file if it becomes empty) and removes any
+previously generated `.ico` files matching the prefix. Other `desktop.ini` settings are left alone.
+
+```rust,ignore
+#[cfg(windows)]
+use icon_sys::folder_settings::sys::windows::{
+    WindowsFolderSettingsProvider, WindowsFolderSettingsProviderExt,
+};
+
+// (block_known_folders, generated_icon_prefix)
+let provider = WindowsFolderSettingsProvider::new_windows(true, None);
+
+provider.set_icon_for_folder_windows(r"C:\path\to\folder", &windows_icon_set).unwrap();
+provider.reset_icon_for_folder_windows(r"C:\path\to\folder").unwrap();
+```
+
+`FolderSettingsProvider::new()` is equivalent to `new_windows(true, None)`. When `generated_icon_prefix` is
+`None`, the crate name (`icon-sys`) is used.
+
+#### Known folder protection
+
+Windows [known folders](https://learn.microsoft.com/en-us/windows/win32/shell/known-folders) are shell-managed
+locations such as Desktop, Documents, Downloads, Pictures, and Music. Their `desktop.ini` files hold
+localized names and default icons. Overwriting them can break how Explorer displays these folders.
+
+With `block_known_folders` set to `true` (the default), the provider uses the COM `IKnownFolderManager`
+to check each path before writing or resetting. If the path is a known folder, the operation fails with
+a `"Folder is a known folder"` error. Notes:
+
+- Only exact matches are blocked. Subfolders such as `Documents\Projects` can still be customized.
+- The check is best-effort. If COM can't be initialized on the calling thread (for example, it is
+  already in a multithreaded apartment), the provider silently skips the check.
+- Pass `false` to turn off the check and skip COM initialization entirely.
+
 ## Usage (Linux)
 
 Linux folder icons have no single mechanism, so a backend is selected based on the
@@ -51,8 +88,8 @@ use icon_sys::folder_settings::sys::linux::{
     LinuxBackend, LinuxFolderSettingsProvider, LinuxFolderSettingsProviderExt,
 };
 
-// (backend, generated_icon_prefix, bump_mtime)
-let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::Auto, None, true);
+// (backend, generated_icon_prefix)
+let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::Auto, None);
 ```
 
 The default folder icon is read from the active icon theme (with `hicolor` fallback)
