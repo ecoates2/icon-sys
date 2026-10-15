@@ -1,0 +1,3 @@
+[workspace]
+# Only publish when a release PR (branch prefix `release-plz-`) is merged.
+release_always = false
