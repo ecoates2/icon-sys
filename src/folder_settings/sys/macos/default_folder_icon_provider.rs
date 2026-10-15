@@ -1,5 +1,5 @@
 use super::MacOsFolderSettingsError;
-use crate::DefaultFolderIconProvider;
+use crate::folder_settings::DefaultFolderIconProvider;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MacOsDefaultFolderIconProvider;

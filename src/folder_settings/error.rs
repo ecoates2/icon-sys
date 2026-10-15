@@ -12,6 +12,10 @@ pub enum FolderSettingsError {
     #[error(transparent)]
     Linux(#[from] crate::folder_settings::sys::linux::LinuxFolderSettingsError),
 
+    #[cfg(target_os = "macos")]
+    #[error(transparent)]
+    MacOs(#[from] crate::folder_settings::sys::macos::MacOsFolderSettingsError),
+
     #[error(transparent)]
     IconError(#[from] crate::icon::IconError),
 }

@@ -1,4 +1,4 @@
-use crate::FolderSettingsProvider;
+use crate::folder_settings::FolderSettingsProvider;
 
 use super::MacOsFolderSettingsError;
 
