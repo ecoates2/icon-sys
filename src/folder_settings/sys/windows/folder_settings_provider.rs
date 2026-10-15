@@ -61,6 +61,8 @@ pub trait WindowsFolderSettingsProviderExt {
     fn reset_icon_for_folder_windows<P: AsRef<Path>>(&self, path: P) -> Result<()>;
 
     /// Constructor with Windows-specific options.
+    /// block_known_folders will throw an error for known folders (ex. Desktop, Downloads).
+    /// generated_icon_prefix controls the prefix of the hidden .ico file
     fn new_windows(block_known_folders: bool, generated_icon_prefix: Option<&str>) -> Self;
 }
 

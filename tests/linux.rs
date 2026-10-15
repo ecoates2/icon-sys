@@ -184,9 +184,7 @@ fn test_gio_metadata_backend_matches_environment_support() {
         .map(|o| o.status.success())
         .unwrap_or(false);
 
-    // The `gio` binary alone is not enough: writing `metadata::*` needs the
-    // GVFS metadata daemon on the session bus, which headless environments
-    // (CI, containers) lack. Probe an actual write rather than `gio --version`.
+    // This will fail if the GVFS metadata daemon isn't available
     let probe_dir = tempdir().expect("Failed to create temp dir");
     let gio_metadata_writable = has_gio
         && std::process::Command::new("gio")
@@ -198,8 +196,7 @@ fn test_gio_metadata_backend_matches_environment_support() {
             .unwrap_or(false);
 
     if !has_gio {
-        // Backend resolution falls back to the `.directory` file when gio
-        // is missing, so the operation still succeeds.
+        // Should fall back to DirectoryFile backend
         assert!(
             result.is_ok(),
             "Backend should fall back to .directory when gio is absent: {:?}",
@@ -238,14 +235,12 @@ fn test_remove_generated_icons_does_not_delete_similar_files() {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let folder_path = temp_dir.path();
 
-    // Create files that look like they could be generated but aren't.
-    // Use .png/.svg extensions but with names that don't match the icon-sys prefix.
+    // Other unrelated files
     std::fs::write(folder_path.join("icon-sys-notes.txt"), "not an icon").unwrap();
     std::fs::write(folder_path.join("my-folder.svg"), "<xml></xml>").unwrap();
     std::fs::write(folder_path.join("background.png"), "not an icon").unwrap();
 
-    // Setting an icon will call remove_generated_icons internally,
-    // then create the actual generated icon file.
+    // Attempts to remove previously set icon before writing again
     let mut icon_set = LinuxIconSet::new();
     icon_set
         .set_svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>")
@@ -256,7 +251,7 @@ fn test_remove_generated_icons_does_not_delete_similar_files() {
         .set_icon_for_folder_linux(folder_path, &icon_set)
         .expect("set_icon_for_folder_linux should succeed");
 
-    // These files should still exist — the cleanup should not delete them.
+    // Assert that unrelated files still exist
     assert!(
         folder_path.join("icon-sys-notes.txt").exists(),
         "Non-generated .txt file should not be deleted"
@@ -314,7 +309,6 @@ fn test_directory_file_parse_error_on_malformed_file() {
     let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::DirectoryFile, None, false);
     let result = provider.set_icon_for_folder_linux(folder_path, &icon_set);
 
-    // Should fail with a parse error, not silently discard the file.
     assert!(
         result.is_err(),
         "Setting icon on a malformed .directory file should fail"
