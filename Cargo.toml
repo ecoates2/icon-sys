@@ -7,7 +7,7 @@ description = "A cross-platform Rust library for managing system shell icons"
 license = "MIT OR Apache-2.0"
 homepage= "https://github.com/ecoates2/icon-sys"
 repository = "https://github.com/ecoates2/icon-sys"
-readme = "README.MD"
+readme = "README.md"
 keywords = ["icons", "folder-icons", "cross-platform", "shell"]
 categories = ["filesystem"]
 
