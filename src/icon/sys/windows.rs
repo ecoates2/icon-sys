@@ -89,6 +89,7 @@ impl<'a> From<WindowsIconImage<'a>> for crate::api::IconImage {
     fn from(icon_image: WindowsIconImage<'a>) -> Self {
         crate::api::IconImage {
             data: icon_image.image.into_owned(),
+            scale: 1.0,
         }
     }
 }
@@ -284,13 +285,19 @@ mod tests {
 
     #[test]
     fn win_image_try_from_api_rejects_invalid_dimension() {
-        let bad = crate::api::IconImage { data: img(17) };
+        let bad = crate::api::IconImage {
+            data: img(17),
+            scale: 1.0,
+        };
         assert!(WindowsIconImage::try_from(&bad).is_err());
     }
 
     #[test]
     fn win_image_try_from_api_accepts_valid_dimension() {
-        let good = crate::api::IconImage { data: img(48) };
+        let good = crate::api::IconImage {
+            data: img(48),
+            scale: 1.0,
+        };
         let win = WindowsIconImage::try_from(&good).unwrap();
         assert_eq!(win.size, WindowsIconSize::Px48);
     }
@@ -300,7 +307,10 @@ mod tests {
         // The TryFrom impl no longer requires all 8 sizes; partial sets are
         // accepted. Callers can check completeness explicitly if needed.
         let partial = crate::api::IconSet {
-            images: vec![crate::api::IconImage { data: img(16) }],
+            images: vec![crate::api::IconImage {
+                data: img(16),
+                scale: 1.0,
+            }],
             svg: None,
         };
         let win_set = WindowsIconSet::try_from(&partial).unwrap();
@@ -314,7 +324,10 @@ mod tests {
     #[test]
     fn try_from_iconset_rejects_invalid_dimension() {
         let bad = crate::api::IconSet {
-            images: vec![crate::api::IconImage { data: img(17) }],
+            images: vec![crate::api::IconImage {
+                data: img(17),
+                scale: 1.0,
+            }],
             svg: None,
         };
         assert!(WindowsIconSet::try_from(&bad).is_err());

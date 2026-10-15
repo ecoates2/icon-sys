@@ -8,6 +8,8 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct IconImage {
     pub data: DynamicImage,
+    /// Display scale factor (1.0 for @1x, 2.0 for @2x, etc.).
+    pub scale: f32,
 }
 
 /// Platform-agnostic system icon image set

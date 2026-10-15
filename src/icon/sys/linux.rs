@@ -29,6 +29,7 @@ impl<'a> From<LinuxIconImage<'a>> for crate::api::IconImage {
     fn from(icon_image: LinuxIconImage<'a>) -> Self {
         crate::api::IconImage {
             data: icon_image.image.into_owned(),
+            scale: 1.0,
         }
     }
 }
