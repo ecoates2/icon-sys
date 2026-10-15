@@ -56,16 +56,12 @@ let provider = LinuxFolderSettingsProvider::new_linux(LinuxBackend::Auto, None, 
 ```
 
 The default folder icon is read from the active icon theme (with `hicolor` fallback)
-as raster sizes plus an optional, `usvg`-validated scalable SVG. Setting a single
-large image is sufficient — file managers scale it for all zoom levels.
+as raster sizes plus an optional, `usvg`-validated scalable SVG.
 
 ## Platform Support
-- **Windows:** Folder settings and default icon dump
-- **Linux:** Folder settings (GNOME/KDE/XFCE backends) and default icon dump
-- **macOS:** Planned support
-
-## Development
-- Run integration tests: `cargo test`
+- **Windows:** folder-settings
+- **Linux:** folder-settings (supports GNOME/KDE/XFCE)
+- **macOS:** Not supported yet- compiles but throws unimplemented
 
 ## License
 MIT OR Apache-2.0
@@ -75,4 +71,4 @@ MIT OR Apache-2.0
 - [**Awesome Copilot**](https://github.com/github/awesome-copilot) — Community-curated collection of Copilot customizations: agents, skills, instructions, hooks, workflows, and plugins
 
 ## Status
-**Work in progress.** Not yet published to crates.io. API may change. Windows and Linux are implemented; macOS is planned.
+**Work in progress.** API is subject to change.
