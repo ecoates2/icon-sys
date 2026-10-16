@@ -51,5 +51,6 @@ exclude = [
     ".github/",
     "deny.toml",
     "release-plz.toml",
-    "skills-lock.json"
+    "skills-lock.json",
+    "CHANGELOG.md"
 ]
