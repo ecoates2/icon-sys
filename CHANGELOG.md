@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2](https://github.com/ecoates2/icon-sys/compare/v0.2.1...v0.2.2) - 2026-11-03
+
+### Other
+
+- *(deps)* bump the cargo group with 2 updates ([#12](https://github.com/ecoates2/icon-sys/pull/12))
+
 ## [0.2.1](https://github.com/ecoates2/icon-sys/compare/v0.2.0...v0.2.1) - 2026-10-18
 
 ### Fixed
